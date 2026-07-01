@@ -41,6 +41,52 @@ func EncryptFile(plaintextPath, outPath string, recipients []age.Recipient) erro
 	return armorWriter.Close() // flushes the armor footer
 }
 
+// EncryptWithPassphrase returns an armored blob of data encrypted with a scrypt
+// passphrase — used to protect the private key itself at rest.
+func EncryptWithPassphrase(data []byte, passphrase string) ([]byte, error) {
+	recipient, err := age.NewScryptRecipient(passphrase)
+	if err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	armorWriter := armor.NewWriter(&buf)
+	w, err := age.Encrypt(armorWriter, recipient)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(data); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	if err := armorWriter.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// DecryptWithPassphrase decrypts an armored scrypt blob produced by EncryptWithPassphrase.
+func DecryptWithPassphrase(blob []byte, passphrase string) ([]byte, error) {
+	id, err := age.NewScryptIdentity(passphrase)
+	if err != nil {
+		return nil, err
+	}
+
+	armorReader := armor.NewReader(bytes.NewReader(blob))
+	r, err := age.Decrypt(armorReader, id)
+	if err != nil {
+		return nil, fmt.Errorf("wrong passphrase or corrupt key: %w", err)
+	}
+
+	var out bytes.Buffer
+	if _, err := io.Copy(&out, r); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
 // DecryptFile reads an armored, encrypted blob and returns the plaintext, using the
 // given identity to unwrap it. Returns a clear error if this identity isn't a recipient.
 func DecryptFile(encPath string, id age.Identity) ([]byte, error) {

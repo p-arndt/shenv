@@ -46,3 +46,26 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
 		t.Fatal("expected non-recipient decryption to fail, got nil error")
 	}
 }
+
+// TestPassphraseRoundTrip verifies scrypt encrypt/decrypt of raw bytes and that a
+// wrong passphrase is rejected.
+func TestPassphraseRoundTrip(t *testing.T) {
+	want := []byte("AGE-SECRET-KEY-1EXAMPLE")
+
+	blob, err := EncryptWithPassphrase(want, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+
+	got, err := DecryptWithPassphrase(blob, "correct horse battery staple")
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("round trip mismatch: got %q want %q", got, want)
+	}
+
+	if _, err := DecryptWithPassphrase(blob, "wrong"); err == nil {
+		t.Fatal("expected wrong passphrase to fail, got nil error")
+	}
+}

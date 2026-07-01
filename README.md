@@ -11,7 +11,7 @@ sees your secrets.
 
 - Your **private key** lives in `~/.shenv/key.txt`. Created **once**, used for every repo — like an SSH key.
 - Each repo has `.shenv/recipients`: a list of teammates' **public keys**. Public, so it's committed.
-- `env.age` is the encrypted `.env`, encrypted *for all recipients at once*. Committed / shared.
+- `env.age` is the encrypted `.env`, encrypted _for all recipients at once_. Committed / shared.
 - `.env` is plaintext. Stays local, auto-gitignored.
 
 ```
@@ -52,13 +52,15 @@ shenv pull                # env.age → .env
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `shenv init [name]` | Create your keypair (if missing), register yourself in this repo, set up `.gitignore` |
-| `shenv whoami` | Print your public key |
-| `shenv add-member <name> <key>` | Add a teammate's public key (then `push`) |
-| `shenv push [file]` | Encrypt `.env` (or `file`) → `env.age` for all members |
-| `shenv pull [file] [--force]` | Decrypt `env.age` → `.env`; asks before clobbering local edits |
+| Command                         | What it does                                                                          |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| `shenv init [name]`             | Create your keypair (if missing), register yourself in this repo, set up `.gitignore` |
+| `shenv whoami`                  | Print your public key                                                                 |
+| `shenv add-member <name> <key>` | Add a teammate's public key (then `push`)                                             |
+| `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.age` for all members                                |
+| `shenv pull [file] [--force]`   | Decrypt `env.age` → `.env`; asks before clobbering local edits                        |
+| `shenv remember`                | Cache your passphrase in the OS keychain so `pull` stops asking                       |
+| `shenv forget`                  | Remove the cached passphrase from the keychain                                        |
 
 ## Build
 
@@ -77,6 +79,28 @@ internal/
   crypto/           # age encrypt/decrypt (storage-agnostic)
   command/          # subcommands wiring the above together
 ```
+
+## Protecting your private key
+
+The private key in `~/.shenv/key.txt` decrypts every secret you have access to, so
+`shenv` protects it in layers:
+
+- **File permissions (always).** On Unix the key is `0600`; on Windows an explicit
+  owner-only ACL is applied (the Unix bits are ignored there), so no other local
+  user can read it.
+- **Passphrase (optional).** `shenv init` offers to encrypt the key at rest with a
+  passphrase (age/scrypt). If set, `pull` prompts for it; `whoami` still works
+  without it, since the public key is kept as a plaintext comment.
+- **OS keychain (optional, for comfort).** `shenv remember` caches the passphrase
+  in the OS keychain (Windows Credential Manager, Linux Secret Service, macOS
+  Keychain), bound to your login, so `pull` stops asking. `shenv forget` removes it.
+  On systems without a keychain (headless Linux, containers) `pull` simply falls
+  back to prompting — it never hard-fails.
+
+These layers compose: a synced/copied `key.txt` is useless without the passphrase,
+and the cached passphrase is bound to your OS login. Note: no software measure
+protects against malware running _as you_ — once the key is unlocked it lives in
+process memory. For that threat, use a hardware-backed key.
 
 ## Notes & roadmap
 

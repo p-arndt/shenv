@@ -3,7 +3,6 @@
 package command
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -29,12 +28,21 @@ func Init(args []string) error {
 		name = args[0]
 	}
 
-	id, err := identity.Create()
+	passphrase, err := readNewPassphrase()
+	if err != nil {
+		return err
+	}
+
+	id, err := identity.Create(passphrase)
 	if err != nil {
 		return err
 	}
 	pub := id.Recipient().String()
 	fmt.Printf("Created identity. Your public key:\n  %s\n\n", pub)
+	if passphrase != "" {
+		fmt.Println("Your private key is encrypted at rest with your passphrase.")
+		offerToRemember(pub, passphrase)
+	}
 
 	if err := recipients.Add(name, pub); err != nil {
 		return err
@@ -50,12 +58,13 @@ func Init(args []string) error {
 }
 
 // Whoami prints the user's public key — the thing they share to get added elsewhere.
+// It never needs the passphrase, even for an encrypted key.
 func Whoami(args []string) error {
-	id, err := identity.Load()
+	pub, err := identity.PublicKey()
 	if err != nil {
 		return err
 	}
-	fmt.Println(id.Recipient().String())
+	fmt.Println(pub)
 	return nil
 }
 
@@ -118,7 +127,11 @@ func Pull(args []string) error {
 		}
 	}
 
-	id, err := identity.Load()
+	pub, err := identity.PublicKey()
+	if err != nil {
+		return err
+	}
+	id, err := identity.Load(unlocker(pub))
 	if err != nil {
 		return err
 	}
@@ -177,10 +190,10 @@ func ensureGitignore() error {
 
 // confirm reads a y/n answer from stdin.
 func confirm() bool {
-	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
+	line, err := stdin.ReadString('\n')
+	if err != nil && line == "" {
 		return false
 	}
-	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
 }

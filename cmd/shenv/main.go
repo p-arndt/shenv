@@ -17,6 +17,8 @@ Usage:
   shenv add-member <name> <key>     Grant a teammate access (then push)
   shenv push [file]                 Encrypt .env → env.age for all members
   shenv pull [file] [--force]       Decrypt env.age → .env
+  shenv remember                    Cache your passphrase in the OS keychain
+  shenv forget                      Remove the cached passphrase
 
 Your private key lives in ~/.shenv/key.txt and is created once, for all repos.
 env.age is safe to commit; .env is not (and is gitignored automatically).`
@@ -40,6 +42,10 @@ func main() {
 		err = command.Push(args)
 	case "pull":
 		err = command.Pull(args)
+	case "remember":
+		err = command.Remember(args)
+	case "forget":
+		err = command.Forget(args)
 	case "help", "-h", "--help":
 		fmt.Println(usage)
 	default:
