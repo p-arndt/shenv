@@ -70,14 +70,14 @@ version:
 # keyword or an explicit version. Examples:
 #   just set-version patch        just set-version 0.2.0
 set-version BUMP="patch":
-    pwsh scripts/set-version.ps1 {{BUMP}}
+    node scripts/set-version.mjs {{BUMP}}
 
 # Cut a release: bump the version (patch|minor|major, or an explicit x.y.z),
 # stamp VERSION, commit, tag, and push -> triggers the release workflow which
 # builds the static binaries for every platform. Examples:
 #   just release            just release minor            just release 1.0.0
 release BUMP="patch":
-    pwsh scripts/release.ps1 {{BUMP}}
+    node scripts/release.mjs {{BUMP}}
 
 # ---------------------------------------------------------------------------
 # Housekeeping
