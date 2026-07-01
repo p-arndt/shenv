@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"shenv/internal/buildinfo"
 	"shenv/internal/command"
 )
 
@@ -20,6 +21,7 @@ Usage:
   shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase
+  shenv version                     Print the shenv version
 
 Your private key lives in ~/.shenv/key.txt and is created once, for all repos.
 env.age is safe to commit; .env is not (and is gitignored automatically).`
@@ -49,6 +51,8 @@ func main() {
 		err = command.Remember(args)
 	case "forget":
 		err = command.Forget(args)
+	case "version", "--version", "-v":
+		fmt.Printf("shenv %s\n", buildinfo.String())
 	case "help", "-h", "--help":
 		fmt.Println(usage)
 	default:

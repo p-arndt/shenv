@@ -1,0 +1,142 @@
+name: Build and Publish Release
+permissions:
+  contents: write
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 0.2.0 or 0.2.0-beta.1 ("v" prefix optional). Leave empty to use the VERSION file with a -pre.<run> suffix'
+        required: false
+        type: string
+      prerelease:
+        description: 'Mark as a GitHub pre-release'
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: 'Create as a draft so you can review/publish it manually'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    # Cross-compiling with CGO disabled means one Linux runner builds every
+    # target — no per-OS matrix needed.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # Reads the Go version straight from go.mod so it never drifts.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              # No version given: derive one from the VERSION file, suffixed with
+              # the semver pre-release identifier "-pre.<run number>" so each
+              # manual run gets its own, ever-incrementing version.
+              VERSION="$(cat VERSION)-pre.${{ github.run_number }}"
+            fi
+            VERSION="${VERSION#v}"
+            PRERELEASE="${{ inputs.prerelease }}"
+            DRAFT="${{ inputs.draft }}"
+          else
+            # Tag push: v0.2.0 -> 0.2.0.
+            VERSION="${GITHUB_REF_NAME#v}"
+            DRAFT=false
+            # Semver pre-release tags (e.g. v0.2.0-beta.1) are flagged automatically.
+            if [[ "$VERSION" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
+          fi
+          echo "VERSION=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "TAG=v$VERSION"      >> "$GITHUB_OUTPUT"
+          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "DRAFT=$DRAFT"       >> "$GITHUB_OUTPUT"
+
+      - name: Build static binaries (all platforms)
+        # CGO_ENABLED=0 links no libc -> every binary is fully static and
+        # portable. -trimpath drops local paths; -s -w strips symbols/DWARF.
+        # Version metadata is injected into internal/buildinfo via -X.
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w \
+            -X shenv/internal/buildinfo.Version=${VERSION} \
+            -X shenv/internal/buildinfo.Commit=${COMMIT} \
+            -X shenv/internal/buildinfo.Date=${DATE}"
+
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS="${target%/*}"; GOARCH="${target#*/}"
+            bin="shenv"; [ "$GOOS" = windows ] && bin="shenv.exe"
+            echo "-> building $GOOS/$GOARCH"
+            rm -rf stage && mkdir stage
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+              go build -trimpath -ldflags "$LDFLAGS" -o "stage/$bin" ./cmd/shenv
+            cp README.md stage/
+            name="shenv_${VERSION}_${GOOS}_${GOARCH}"
+            if [ "$GOOS" = windows ]; then
+              (cd stage && zip -q "../dist/${name}.zip" "$bin" README.md)
+            else
+              tar -czf "dist/${name}.tar.gz" -C stage "$bin" README.md
+            fi
+          done
+
+          # Checksums over the archives (computed before the file itself exists).
+          (cd dist && sha256sum shenv_*.* > "shenv_${VERSION}_checksums.txt")
+          ls -l dist
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          # On a tag push the tag already exists, so --latest covers it. On a
+          # manual run no tag exists yet (action-gh-release creates it below),
+          # so fall back to --unreleased to cover commits since the last tag.
+          args: ${{ github.event_name == 'workflow_dispatch' && '--unreleased --strip all' || '--latest --strip all' }}
+        env:
+          OUTPUT: CHANGELOG_BODY.md
+
+      - name: Assemble release notes
+        shell: bash
+        run: |
+          CUR="${{ steps.version.outputs.TAG }}"
+          if [ "${{ steps.version.outputs.PRERELEASE }}" = "true" ]; then
+            echo "## 🧪 Pre-release $CUR" > RELEASE_NOTES.md
+          else
+            echo "## 🚀 Release $CUR" > RELEASE_NOTES.md
+          fi
+          echo "" >> RELEASE_NOTES.md
+          cat CHANGELOG_BODY.md >> RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ steps.version.outputs.PRERELEASE }}
+          draft: ${{ steps.version.outputs.DRAFT }}
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
