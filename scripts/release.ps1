@@ -42,12 +42,21 @@ Write-Host "Releasing $tag  ($current -> $next)`n"
 # 3. Stamp the VERSION file.
 Set-CurrentVersion -Version $next
 
-# 4. Commit + annotated tag.
-Invoke-Git add VERSION | Out-Null
-Invoke-Git commit -m "release: $tag" | Out-Null
+# 4. Commit the bump — unless VERSION is already at the target (e.g. the very
+#    first release, where the version is already in the file), in which case
+#    there's nothing to commit and we simply tag the current HEAD.
+& git diff --quiet -- VERSION
+if ($LASTEXITCODE -ne 0) {
+    Invoke-Git add VERSION | Out-Null
+    Invoke-Git commit -m "release: $tag" | Out-Null
+} else {
+    Write-Host "VERSION already at $next — tagging the current commit."
+}
+
+# 5. Annotated tag on HEAD.
 Invoke-Git tag -a $tag -m $tag | Out-Null
 
-# 5. Push the current branch together with the new tag.
+# 6. Push the current branch together with the new tag.
 $branch = Invoke-Git rev-parse --abbrev-ref HEAD
 Write-Host "`nPushing $branch + $tag ..."
 Invoke-Git push origin $branch --follow-tags | Out-Null
