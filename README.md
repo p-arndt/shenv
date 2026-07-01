@@ -1,11 +1,21 @@
-# shenv
+<div align="center">
 
-Share encrypted `.env` files across a small team — no server, no accounts, no plaintext in git.
+<img src="assets/logo.png" width="220" alt="shenv icon" />
+
+# shenv 
+
+**Share encrypted `.env` files across a small team — no server, no accounts, no plaintext in git.**
 
 `shenv` uses [age](https://age-encryption.org) end-to-end encryption: the plaintext `.env`
 never leaves your machine, and only teammates whose public key is on the recipients list can
 decrypt. The encrypted `env.age` blob is safe to commit or drop in S3/a Gist — storage never
 sees your secrets.
+
+[![Release](https://img.shields.io/github/v/release/p-arndt/shenv?display_name=tag&sort=semver)](https://github.com/p-arndt/shenv/releases)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+</div>
+
 
 ## How it works
 
@@ -24,7 +34,7 @@ pull:  env.age  ──decrypt with your key──►  .env          (local only)
 First dev in a repo:
 
 ```sh
-shenv init patrick        # make your keypair (once ever) + set up this repo
+shenv init bob # make your keypair (once ever) + set up this repo
 # ...put secrets in .env...
 shenv push                # .env → env.age, then commit env.age + .shenv/recipients
 ```
@@ -32,7 +42,7 @@ shenv push                # .env → env.age, then commit env.age + .shenv/recip
 A new teammate:
 
 ```sh
-shenv init bob            # once ever, on their machine
+shenv init alice # once ever, on their machine
 shenv whoami              # prints their public key: age1...
 # they send you that key (it's public — Slack/mail is fine)
 ```
@@ -40,11 +50,11 @@ shenv whoami              # prints their public key: age1...
 You grant them access:
 
 ```sh
-shenv add-member bob age1...
-shenv push                # re-encrypt so bob is included; commit env.age
+shenv add-member alice age1...
+shenv push                # re-encrypt so alice is included; commit env.age
 ```
 
-Now bob can:
+Now alice can:
 
 ```sh
 shenv pull                # env.age → .env
