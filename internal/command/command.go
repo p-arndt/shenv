@@ -102,16 +102,29 @@ func Push(args []string) error {
 		return err
 	}
 
+	// The recipients file is committed and arrives over an untrusted channel, so a
+	// silently-injected key would exfiltrate every secret on the next push. Show
+	// the current members and require confirmation if the set changed since last time.
+	if proceed, err := confirmRecipients(members); err != nil {
+		return err
+	} else if !proceed {
+		fmt.Println("Aborted — recipients not confirmed.")
+		return nil
+	}
+
 	blob, err := crypto.EncryptBytes(plaintext, keys)
 	if err != nil {
 		return err
 	}
 
-	store, err := backend.Load()
+	store, err := loadBackend()
 	if err != nil {
 		return err
 	}
 	if err := store.Put(blob); err != nil {
+		return err
+	}
+	if err := rememberRecipients(members); err != nil {
 		return err
 	}
 	fmt.Printf("Encrypted %s → %s for %d member(s).\n", in, store, len(members))
@@ -140,6 +153,12 @@ func Pull(args []string) error {
 	plaintext, err := decryptEnv()
 	if err != nil {
 		return err
+	}
+
+	// Refuse to write the plaintext through a pre-planted symlink, which could
+	// redirect secrets to an attacker-chosen path.
+	if fi, err := os.Lstat(out); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; refusing to write decrypted secrets through it", out)
 	}
 
 	if !force {

@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/dotenv"
 	"shenv/internal/identity"
@@ -17,7 +16,7 @@ import (
 // memory, unlocking the key via the keychain or a prompt as needed. Shared by
 // pull (writes it to disk) and run (injects it).
 func decryptEnv() ([]byte, error) {
-	store, err := backend.Load()
+	store, err := loadBackend()
 	if err != nil {
 		return nil, err
 	}

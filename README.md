@@ -117,6 +117,14 @@ put = aws s3 cp - s3://my-bucket/env.age
 Swap in `curl`, `rclone`, `gh gist`, `scp`, … — whatever moves bytes. With no
 config (or `backend = file`) it stays a repo file; set `path = ...` to relocate it.
 
+Because the exec backend runs shell commands that arrive with the repo (a clone,
+a merged PR), shenv treats them as untrusted: the first time it would run an
+`exec` backend — and again whenever the commands change — it prints them and asks
+for approval, recording your answer under `~/.shenv/trusted` so later runs are
+silent. Review the commands before approving; only approve what you'd be willing
+to run yourself. In CI (no prompt), set `SHENV_ALLOW_EXEC=1` to pre-approve, and
+only where you control the config.
+
 ## Protecting your private key
 
 The private key in `~/.shenv/key.txt` decrypts every secret you have access to, so
@@ -143,6 +151,16 @@ process memory. For that threat, use a hardware-backed key.
 
 - **Onboarding re-push:** adding a member requires one existing member to `push` again
   (their key wasn't in the previous blob). Inherent to E2E; it's a one-liner.
+- **Recipients are committed, so `push` guards them:** the `.shenv/recipients` list
+  travels over the same untrusted channel as the ciphertext. `push` lists exactly who
+  it will encrypt for and, if the set changed since your last push on this machine,
+  shows the added/removed keys and asks you to confirm — so an injected key can't
+  silently grant an outsider access to your secrets.
+- **Confidentiality, not sender authentication:** the age recipients used here hide
+  contents from non-members, but they do not prove *who* wrote `env.age`. Any current
+  member (or anyone who can edit the recipients list) can replace the blob; a puller
+  can't cryptographically tell who produced it. shenv assumes a small, mutually
+  trusted team — it is not a defense against a malicious member.
 - `shenv run` keeps secrets out of any file, but environment variables are still
   readable by other processes running *as you* (`/proc/<pid>/environ`, `ps e`).
   It reduces the leak surface versus a file; it is not a hard boundary.
