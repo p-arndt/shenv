@@ -127,15 +127,7 @@ func Pull(args []string) error {
 		}
 	}
 
-	pub, err := identity.PublicKey()
-	if err != nil {
-		return err
-	}
-	id, err := identity.Load(unlocker(pub))
-	if err != nil {
-		return err
-	}
-	plaintext, err := crypto.DecryptFile(encryptedPath, id)
+	plaintext, err := decryptEnv()
 	if err != nil {
 		return err
 	}

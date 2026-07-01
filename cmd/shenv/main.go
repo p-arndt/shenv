@@ -17,6 +17,7 @@ Usage:
   shenv add-member <name> <key>     Grant a teammate access (then push)
   shenv push [file]                 Encrypt .env → env.age for all members
   shenv pull [file] [--force]       Decrypt env.age → .env
+  shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase
 
@@ -42,6 +43,8 @@ func main() {
 		err = command.Push(args)
 	case "pull":
 		err = command.Pull(args)
+	case "run":
+		err = command.Run(args)
 	case "remember":
 		err = command.Remember(args)
 	case "forget":

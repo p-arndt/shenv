@@ -50,6 +50,12 @@ Now bob can:
 shenv pull                # env.age → .env
 ```
 
+Or skip the file entirely and inject secrets straight into a process:
+
+```sh
+shenv run -- npm start    # secrets live only in npm's environment, no .env written
+```
+
 ## Commands
 
 | Command                         | What it does                                                                          |
@@ -59,6 +65,7 @@ shenv pull                # env.age → .env
 | `shenv add-member <name> <key>` | Add a teammate's public key (then `push`)                                             |
 | `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.age` for all members                                |
 | `shenv pull [file] [--force]`   | Decrypt `env.age` → `.env`; asks before clobbering local edits                        |
+| `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
 | `shenv remember`                | Cache your passphrase in the OS keychain so `pull` stops asking                       |
 | `shenv forget`                  | Remove the cached passphrase from the keychain                                        |
 
@@ -74,9 +81,11 @@ go test ./...
 ```
 cmd/shenv/          # entry point: arg dispatch + usage
 internal/
-  identity/         # the global ~/.shenv/key.txt keypair
+  identity/         # the global ~/.shenv/key.txt keypair (+ optional passphrase)
   recipients/       # the per-repo .shenv/recipients list
   crypto/           # age encrypt/decrypt (storage-agnostic)
+  keystore/         # optional OS-keychain passphrase cache
+  dotenv/           # minimal .env parser (for `run`)
   command/          # subcommands wiring the above together
 ```
 
@@ -106,5 +115,8 @@ process memory. For that threat, use a hardware-backed key.
 
 - **Onboarding re-push:** adding a member requires one existing member to `push` again
   (their key wasn't in the previous blob). Inherent to E2E; it's a one-liner.
-- Planned: pluggable storage backends (S3, Gist, `github:user` key lookup),
-  `shenv run -- <cmd>` to inject secrets into a process without writing `.env` to disk.
+- `shenv run` keeps secrets out of any file, but environment variables are still
+  readable by other processes running *as you* (`/proc/<pid>/environ`, `ps e`).
+  It reduces the leak surface versus a file; it is not a hard boundary.
+- Planned: pluggable storage backends (S3, Gist, `github:user` key lookup), CI
+  support via `SHENV_IDENTITY` / `SHENV_PASSPHRASE` environment variables.
