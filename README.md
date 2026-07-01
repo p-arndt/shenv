@@ -1,0 +1,86 @@
+# shenv
+
+Share encrypted `.env` files across a small team — no server, no accounts, no plaintext in git.
+
+`shenv` uses [age](https://age-encryption.org) end-to-end encryption: the plaintext `.env`
+never leaves your machine, and only teammates whose public key is on the recipients list can
+decrypt. The encrypted `env.age` blob is safe to commit or drop in S3/a Gist — storage never
+sees your secrets.
+
+## How it works
+
+- Your **private key** lives in `~/.shenv/key.txt`. Created **once**, used for every repo — like an SSH key.
+- Each repo has `.shenv/recipients`: a list of teammates' **public keys**. Public, so it's committed.
+- `env.age` is the encrypted `.env`, encrypted *for all recipients at once*. Committed / shared.
+- `.env` is plaintext. Stays local, auto-gitignored.
+
+```
+push:  .env  ──encrypt for every recipient──►  env.age   (shared)
+pull:  env.age  ──decrypt with your key──►  .env          (local only)
+```
+
+## Quick start
+
+First dev in a repo:
+
+```sh
+shenv init patrick        # make your keypair (once ever) + set up this repo
+# ...put secrets in .env...
+shenv push                # .env → env.age, then commit env.age + .shenv/recipients
+```
+
+A new teammate:
+
+```sh
+shenv init bob            # once ever, on their machine
+shenv whoami              # prints their public key: age1...
+# they send you that key (it's public — Slack/mail is fine)
+```
+
+You grant them access:
+
+```sh
+shenv add-member bob age1...
+shenv push                # re-encrypt so bob is included; commit env.age
+```
+
+Now bob can:
+
+```sh
+shenv pull                # env.age → .env
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `shenv init [name]` | Create your keypair (if missing), register yourself in this repo, set up `.gitignore` |
+| `shenv whoami` | Print your public key |
+| `shenv add-member <name> <key>` | Add a teammate's public key (then `push`) |
+| `shenv push [file]` | Encrypt `.env` (or `file`) → `env.age` for all members |
+| `shenv pull [file] [--force]` | Decrypt `env.age` → `.env`; asks before clobbering local edits |
+
+## Build
+
+```sh
+go build -o shenv ./cmd/shenv
+go test ./...
+```
+
+## Project layout
+
+```
+cmd/shenv/          # entry point: arg dispatch + usage
+internal/
+  identity/         # the global ~/.shenv/key.txt keypair
+  recipients/       # the per-repo .shenv/recipients list
+  crypto/           # age encrypt/decrypt (storage-agnostic)
+  command/          # subcommands wiring the above together
+```
+
+## Notes & roadmap
+
+- **Onboarding re-push:** adding a member requires one existing member to `push` again
+  (their key wasn't in the previous blob). Inherent to E2E; it's a one-liner.
+- Planned: pluggable storage backends (S3, Gist, `github:user` key lookup),
+  `shenv run -- <cmd>` to inject secrets into a process without writing `.env` to disk.
