@@ -108,9 +108,6 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(path); err == nil {
-		return nil, fmt.Errorf("identity already exists at %s — remove it manually to regenerate", path)
-	}
 
 	id, err := age.GenerateX25519Identity()
 	if err != nil {
@@ -125,8 +122,23 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	// 0o600 covers Unix; Windows ignores it, so secureKeyFile enforces the ACL.
-	if err := os.WriteFile(path, content, 0o600); err != nil {
+	// O_EXCL makes create-if-absent atomic: no stat/write race, and it refuses to
+	// follow a pre-planted symlink at the key path. 0o600 covers Unix; Windows
+	// ignores it, so secureKeyFile enforces the ACL.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil, fmt.Errorf("identity already exists at %s — remove it manually to regenerate", path)
+		}
+		return nil, err
+	}
+	if _, err := f.Write(content); err != nil {
+		f.Close()
+		os.Remove(path)
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
 		return nil, err
 	}
 	if err := secureKeyFile(path); err != nil {

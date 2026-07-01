@@ -84,8 +84,15 @@ func Push(args []string) error {
 	if len(args) > 0 {
 		in = args[0]
 	}
-	if _, err := os.Stat(in); err != nil {
+	fi, err := os.Lstat(in)
+	if err != nil {
 		return fmt.Errorf("no %s to push — create it first", in)
+	}
+	// A repo could ship .env as a committed symlink to a sensitive file (the
+	// private key, ~/.aws/credentials, …); pushing would then encrypt and share
+	// that file's contents with every recipient.
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; refusing to read secrets through it", in)
 	}
 
 	plaintext, err := os.ReadFile(in)
@@ -105,7 +112,11 @@ func Push(args []string) error {
 	// The recipients file is committed and arrives over an untrusted channel, so a
 	// silently-injected key would exfiltrate every secret on the next push. Show
 	// the current members and require confirmation if the set changed since last time.
-	if proceed, err := confirmRecipients(members); err != nil {
+	selfKey, err := identity.PublicKey()
+	if err != nil {
+		selfKey = "" // no identity yet: every recipient counts as foreign
+	}
+	if proceed, err := confirmRecipients(members, selfKey); err != nil {
 		return err
 	} else if !proceed {
 		fmt.Println("Aborted — recipients not confirmed.")
@@ -174,6 +185,10 @@ func Pull(args []string) error {
 	if err := os.WriteFile(out, plaintext, 0o600); err != nil {
 		return err
 	}
+	// WriteFile's mode only applies on create; if the file already existed with
+	// looser permissions, tighten them now (best-effort — a no-op on Windows,
+	// where the home/repo ACLs govern access).
+	_ = os.Chmod(out, 0o600)
 	fmt.Printf("Wrote %s (%d bytes). Keep it local — it's gitignored.\n", out, len(plaintext))
 	return nil
 }

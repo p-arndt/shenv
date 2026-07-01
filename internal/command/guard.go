@@ -69,8 +69,11 @@ func pushedRecipientsPath() (string, error) {
 // confirmRecipients lists the members the secrets are about to be encrypted for and,
 // if that set changed since this machine's last push, shows the additions/removals
 // and asks the user to confirm. This turns a silent recipient injection into a
-// visible, blocking prompt. Returns true to proceed.
-func confirmRecipients(members []recipients.Member) (bool, error) {
+// visible, blocking prompt. selfKey is the user's own public key (may be empty);
+// on the very first push from a machine, any recipient beyond it must also be
+// confirmed — the list comes from the repo, so a fresh clone could otherwise
+// exfiltrate to a planted key with no prompt at all. Returns true to proceed.
+func confirmRecipients(members []recipients.Member, selfKey string) (bool, error) {
 	fmt.Printf("Encrypting for %d recipient(s):\n", len(members))
 	for _, m := range members {
 		fmt.Printf("    %s  %s\n", m.Name, m.Key)
@@ -81,7 +84,14 @@ func confirmRecipients(members []recipients.Member) (bool, error) {
 		return false, err
 	}
 	if !havePrev {
-		return true, nil // first push from this machine: nothing to compare against
+		for _, m := range members {
+			if m.Key != selfKey {
+				fmt.Println("\nFirst push from this machine — the recipient list above comes from the repo.")
+				fmt.Print("Anyone listed will be able to decrypt these secrets. Continue? [y/N] ")
+				return confirm(), nil
+			}
+		}
+		return true, nil // first push, but only encrypting for yourself
 	}
 
 	cur := recipientSet(members)

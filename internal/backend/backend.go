@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -50,8 +51,15 @@ func (b FileBackend) Get() ([]byte, error) {
 	return readCapped(f, b.Path)
 }
 
-func (b FileBackend) Put(data []byte) error { return os.WriteFile(b.Path, data, 0o644) }
-func (b FileBackend) String() string        { return b.Path }
+func (b FileBackend) Put(data []byte) error {
+	// A committed symlink at the blob path would redirect the write to an
+	// attacker-chosen file (os.WriteFile follows symlinks).
+	if fi, err := os.Lstat(b.Path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink; refusing to write through it", b.Path)
+	}
+	return os.WriteFile(b.Path, data, 0o644)
+}
+func (b FileBackend) String() string { return b.Path }
 
 // ExecBackend delegates storage to shell commands: `get` must write the blob to
 // stdout, `put` must read it from stdin.
@@ -104,12 +112,27 @@ func Load() (Backend, error) {
 		if path == "" {
 			path = DefaultBlobPath
 		}
+		if err := validateBlobPath(path); err != nil {
+			return nil, err
+		}
 		return FileBackend{Path: path}, nil
 	case "exec":
 		return ExecBackend{GetCmd: cfg["get"], PutCmd: cfg["put"]}, nil
 	default:
 		return nil, fmt.Errorf("unknown backend %q in %s (use `file` or `exec`)", cfg["backend"], configPath)
 	}
+}
+
+// validateBlobPath rejects file-backend paths that reach outside the repo. The
+// config ships with the clone, and unlike exec commands the file backend has no
+// trust prompt — an absolute or `..`-escaping path would let a hostile config
+// make `push` overwrite arbitrary files on this machine.
+func validateBlobPath(path string) error {
+	// IsLocal rejects absolute, rooted, `..`-escaping, and Windows-reserved paths.
+	if !filepath.IsLocal(path) {
+		return fmt.Errorf("blob path %q in %s must stay inside the repo", path, configPath)
+	}
+	return nil
 }
 
 // readCapped reads r into memory, refusing to buffer more than maxBlobSize bytes.

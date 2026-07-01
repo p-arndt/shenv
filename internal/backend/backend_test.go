@@ -95,6 +95,29 @@ func TestLoadExecFromConfig(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsEscapingBlobPath: the config ships with the clone, so a blob
+// path pointing outside the repo would let a hostile config overwrite arbitrary
+// files on push.
+func TestLoadRejectsEscapingBlobPath(t *testing.T) {
+	bad := []string{"../outside.age", "..", "sub/../../outside.age", "/etc/passwd"}
+	if runtime.GOOS == "windows" {
+		bad = append(bad, "C:\\evil.age", "C:evil.age", "\\\\host\\share\\evil.age")
+	}
+	for _, path := range bad {
+		inRepo(t)
+		writeConfig(t, "backend = file\npath = "+path+"\n")
+		if _, err := Load(); err == nil {
+			t.Errorf("path %q should be rejected", path)
+		}
+	}
+	// A normal in-repo path (including subdirectories) must still work.
+	inRepo(t)
+	writeConfig(t, "backend = file\npath = blobs/env.age\n")
+	if _, err := Load(); err != nil {
+		t.Errorf("in-repo path should be accepted: %v", err)
+	}
+}
+
 func TestLoadUnknownBackend(t *testing.T) {
 	inRepo(t)
 	writeConfig(t, "backend = ftp\n")

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"filippo.io/age"
 )
@@ -64,6 +65,9 @@ func Save(members []Member) error {
 
 // Add inserts or updates a member by name and persists the list.
 func Add(name, key string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
 	if _, err := age.ParseX25519Recipient(key); err != nil {
 		return fmt.Errorf("invalid public key %q: %w", key, err)
 	}
@@ -78,6 +82,24 @@ func Add(name, key string) error {
 		}
 	}
 	return Save(append(members, Member{Name: name, Key: key}))
+}
+
+// validateName rejects names that would corrupt the line-oriented recipients
+// file: whitespace or control characters (a newline could smuggle in an entire
+// extra recipient line) and a leading '#' (would comment the entry out).
+func validateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("member name must not be empty")
+	}
+	if strings.HasPrefix(name, "#") {
+		return fmt.Errorf("member name %q must not start with '#'", name)
+	}
+	for _, r := range name {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Errorf("member name %q must not contain whitespace or control characters", name)
+		}
+	}
+	return nil
 }
 
 // Keys parses every member into an age.Recipient for encryption.
