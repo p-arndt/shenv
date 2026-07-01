@@ -7,14 +7,25 @@ import (
 	"os/exec"
 	"strings"
 
+	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/dotenv"
 	"shenv/internal/identity"
 )
 
-// decryptEnv decrypts env.age into memory, unlocking the key via the keychain or
-// a prompt as needed. Shared by pull (writes it to disk) and run (injects it).
+// decryptEnv fetches the blob from the configured backend and decrypts it into
+// memory, unlocking the key via the keychain or a prompt as needed. Shared by
+// pull (writes it to disk) and run (injects it).
 func decryptEnv() ([]byte, error) {
+	store, err := backend.Load()
+	if err != nil {
+		return nil, err
+	}
+	blob, err := store.Get()
+	if err != nil {
+		return nil, err
+	}
+
 	pub, err := identity.PublicKey()
 	if err != nil {
 		return nil, err
@@ -23,7 +34,7 @@ func decryptEnv() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return crypto.DecryptFile(encryptedPath, id)
+	return crypto.DecryptBytes(blob, id)
 }
 
 // Run decrypts the secrets into memory and runs a command with them injected as

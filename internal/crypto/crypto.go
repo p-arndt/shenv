@@ -1,44 +1,50 @@
-// Package crypto wraps age encryption/decryption of files. It is deliberately
-// storage-agnostic: it only turns plaintext into an armored blob and back, and
-// knows nothing about where that blob is stored.
+// Package crypto wraps age encryption/decryption. It is purely bytes-in/bytes-out
+// and knows nothing about where blobs are stored — that is the backend's job.
 package crypto
 
 import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
 )
 
-// EncryptFile reads a plaintext file and writes an ASCII-armored, encrypted blob
-// that any of the given recipients can later decrypt. Armor keeps git diffs text-friendly.
-func EncryptFile(plaintextPath, outPath string, recipients []age.Recipient) error {
-	plaintext, err := os.ReadFile(plaintextPath)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", plaintextPath, err)
-	}
-
-	out, err := os.Create(outPath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	armorWriter := armor.NewWriter(out)
+// EncryptBytes returns an ASCII-armored, encrypted blob that any of the given
+// recipients can later decrypt. Armor keeps stored blobs text-friendly.
+func EncryptBytes(plaintext []byte, recipients []age.Recipient) ([]byte, error) {
+	var buf bytes.Buffer
+	armorWriter := armor.NewWriter(&buf)
 	w, err := age.Encrypt(armorWriter, recipients...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := w.Write(plaintext); err != nil {
-		return err
+		return nil, err
 	}
 	if err := w.Close(); err != nil { // flushes the age stream
-		return err
+		return nil, err
 	}
-	return armorWriter.Close() // flushes the armor footer
+	if err := armorWriter.Close(); err != nil { // flushes the armor footer
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// DecryptBytes unwraps an armored blob with the given identity. It returns a clear
+// error if this identity isn't among the recipients.
+func DecryptBytes(blob []byte, id age.Identity) ([]byte, error) {
+	armorReader := armor.NewReader(bytes.NewReader(blob))
+	r, err := age.Decrypt(armorReader, id)
+	if err != nil {
+		return nil, fmt.Errorf("cannot decrypt (are you a member of this repo?): %w", err)
+	}
+	var out bytes.Buffer
+	if _, err := io.Copy(&out, r); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 // EncryptWithPassphrase returns an armored blob of data encrypted with a scrypt
@@ -85,29 +91,4 @@ func DecryptWithPassphrase(blob []byte, passphrase string) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
-}
-
-// DecryptFile reads an armored, encrypted blob and returns the plaintext, using the
-// given identity to unwrap it. Returns a clear error if this identity isn't a recipient.
-func DecryptFile(encPath string, id age.Identity) ([]byte, error) {
-	f, err := os.Open(encPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s not found — has anyone run `shenv push` yet?", encPath)
-		}
-		return nil, err
-	}
-	defer f.Close()
-
-	armorReader := armor.NewReader(f)
-	r, err := age.Decrypt(armorReader, id)
-	if err != nil {
-		return nil, fmt.Errorf("cannot decrypt %s (are you a member of this repo?): %w", encPath, err)
-	}
-
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }

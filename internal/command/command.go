@@ -8,17 +8,14 @@ import (
 	"os"
 	"strings"
 
+	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/identity"
 	"shenv/internal/recipients"
 )
 
-const (
-	// encryptedPath is the shared, encrypted blob — committed / uploaded.
-	encryptedPath = "env.age"
-	// defaultEnvFile is the local plaintext file — never committed.
-	defaultEnvFile = ".env"
-)
+// defaultEnvFile is the local plaintext file — never committed.
+const defaultEnvFile = ".env"
 
 // Init generates the user's global keypair (if missing), registers them as the
 // first recipient of this repo, and sets up .gitignore so plaintext never leaks.
@@ -91,6 +88,11 @@ func Push(args []string) error {
 		return fmt.Errorf("no %s to push — create it first", in)
 	}
 
+	plaintext, err := os.ReadFile(in)
+	if err != nil {
+		return err
+	}
+
 	members, err := recipients.Load()
 	if err != nil {
 		return err
@@ -100,11 +102,19 @@ func Push(args []string) error {
 		return err
 	}
 
-	if err := crypto.EncryptFile(in, encryptedPath, keys); err != nil {
+	blob, err := crypto.EncryptBytes(plaintext, keys)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("Encrypted %s → %s for %d member(s). Commit/share %s.\n",
-		in, encryptedPath, len(members), encryptedPath)
+
+	store, err := backend.Load()
+	if err != nil {
+		return err
+	}
+	if err := store.Put(blob); err != nil {
+		return err
+	}
+	fmt.Printf("Encrypted %s → %s for %d member(s).\n", in, store, len(members))
 	return nil
 }
 
@@ -162,9 +172,9 @@ func ensureGitignore() error {
 	if !lines[defaultEnvFile] {
 		add = append(add, defaultEnvFile)
 	}
-	// Explicitly un-ignore env.age in case a broad rule hides it.
-	if !lines["!"+encryptedPath] {
-		add = append(add, "!"+encryptedPath)
+	// Explicitly un-ignore the blob in case a broad rule hides it.
+	if !lines["!"+backend.DefaultBlobPath] {
+		add = append(add, "!"+backend.DefaultBlobPath)
 	}
 	if len(add) == 0 {
 		return nil

@@ -86,8 +86,26 @@ internal/
   crypto/           # age encrypt/decrypt (storage-agnostic)
   keystore/         # optional OS-keychain passphrase cache
   dotenv/           # minimal .env parser (for `run`)
+  backend/          # where the encrypted blob lives (file | exec)
   command/          # subcommands wiring the above together
 ```
+
+## Storage backends
+
+By default the encrypted blob is a file (`env.age`) in the repo — share it by
+committing it. For anything else, an **exec** backend delegates get/put to shell
+commands, so any storage tool works without shenv depending on it. Configure it
+in `.shenv/config` (safe to commit — it holds no secrets):
+
+```ini
+backend = exec
+# `get` writes the blob to stdout; `put` reads it from stdin.
+get = aws s3 cp s3://my-bucket/env.age -
+put = aws s3 cp - s3://my-bucket/env.age
+```
+
+Swap in `curl`, `rclone`, `gh gist`, `scp`, … — whatever moves bytes. With no
+config (or `backend = file`) it stays a repo file; set `path = ...` to relocate it.
 
 ## Protecting your private key
 
@@ -118,5 +136,5 @@ process memory. For that threat, use a hardware-backed key.
 - `shenv run` keeps secrets out of any file, but environment variables are still
   readable by other processes running *as you* (`/proc/<pid>/environ`, `ps e`).
   It reduces the leak surface versus a file; it is not a hard boundary.
-- Planned: pluggable storage backends (S3, Gist, `github:user` key lookup), CI
-  support via `SHENV_IDENTITY` / `SHENV_PASSPHRASE` environment variables.
+- Planned: `github:user` public-key lookup for onboarding, CI support via
+  `SHENV_IDENTITY` / `SHENV_PASSPHRASE` environment variables.
