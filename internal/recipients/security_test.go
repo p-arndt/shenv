@@ -36,6 +36,26 @@ func TestLoadRejectsControlCharacterNames(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsDuplicateKeys: attribution maps name → keys one-to-one; an
+// entry reusing another member's age key (push's "who am I" lookup) or sign
+// key (pull's "who signed this" lookup) makes both ambiguous.
+func TestLoadRejectsDuplicateKeys(t *testing.T) {
+	inRepo(t)
+	key, signKey := testKey(t), testSignKey(t)
+	cases := map[string]string{
+		"shared age key":  fmt.Sprintf("alice %s %s\nbob %s %s\n", key, testSignKey(t), key, testSignKey(t)),
+		"shared sign key": fmt.Sprintf("alice %s %s\nbob %s %s\n", testKey(t), signKey, testKey(t), signKey),
+	}
+	for name, content := range cases {
+		if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "share the same") {
+			t.Fatalf("%s: expected a shared-key error, got %v", name, err)
+		}
+	}
+}
+
 // TestLoadRejectsInvalidKeys: the key columns must be validated on load, not
 // only where they happen to be parsed later. Push's recipient-change prompt
 // echoes these fields, so a "sign key" smuggling terminal escapes (invalid

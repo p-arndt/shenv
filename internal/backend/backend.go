@@ -150,14 +150,32 @@ func Load() (Backend, error) {
 	}
 }
 
-// validateBlobPath rejects file-backend paths that reach outside the repo. The
-// config ships with the clone, and unlike exec commands the file backend has no
-// trust prompt — an absolute or `..`-escaping path would let a hostile config
-// make `push` overwrite arbitrary files on this machine.
+// validateBlobPath rejects file-backend paths that reach outside the repo or
+// collide with files shenv (or git) depends on. The config ships with the
+// clone, and unlike exec commands the file backend has no trust prompt — an
+// absolute or `..`-escaping path would let a hostile config make `push`
+// overwrite arbitrary files on this machine, and a path like `.gitignore`
+// would let it silently delete the rule keeping the plaintext .env out of
+// commits.
 func validateBlobPath(path string) error {
 	// IsLocal rejects absolute, rooted, `..`-escaping, and Windows-reserved paths.
 	if !filepath.IsLocal(path) {
 		return fmt.Errorf("blob path %q in %s must stay inside the repo", path, configPath)
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	first := clean
+	if i := strings.IndexByte(clean, filepath.Separator); i >= 0 {
+		first = clean[:i]
+	}
+	// Writing into .git could clobber hooks or the repo config. EqualFold covers
+	// Windows/macOS case-insensitive filesystems.
+	if strings.EqualFold(first, ".git") {
+		return fmt.Errorf("blob path %q in %s must not point into .git", path, configPath)
+	}
+	for _, reserved := range []string{".gitignore", ".env", configPath, "recipients.shenv"} {
+		if strings.EqualFold(clean, reserved) {
+			return fmt.Errorf("blob path %q in %s would overwrite %s", path, configPath, reserved)
+		}
 	}
 	return nil
 }

@@ -130,8 +130,10 @@ func TestInitReusesExistingKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(members) != 2 {
-		t.Fatalf("expected both registrations, got %+v", members)
+	// Same key, new name = a rename, not a second entry: duplicate keys would
+	// make signature attribution ambiguous, so Load rejects them.
+	if len(members) != 1 || members[0].Name != "me2" {
+		t.Fatalf("re-init under a new name should rename the single entry, got %+v", members)
 	}
 }
 

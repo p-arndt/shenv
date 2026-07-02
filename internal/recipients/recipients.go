@@ -36,6 +36,8 @@ func Load() ([]Member, error) {
 	}
 	var members []Member
 	seen := map[string]bool{}
+	seenKey := map[string]string{}  // age key → member name
+	seenSign := map[string]string{} // sign key → member name
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -67,6 +69,16 @@ func Load() ([]Member, error) {
 			return nil, fmt.Errorf("duplicate member %q in %s — names must be unique so signatures can't be verified against the wrong key", fields[0], Path)
 		}
 		seen[fields[0]] = true
+		// Keys must be one-to-one with names as well: signature attribution maps
+		// name → sign key, and push identifies "you" by age key. An entry reusing
+		// another member's keys would make "signed by <name>" ambiguous.
+		if other, dup := seenKey[fields[1]]; dup {
+			return nil, fmt.Errorf("members %q and %q in %s share the same public key — each member needs their own key so pushes attribute to the right person", other, fields[0], Path)
+		}
+		if other, dup := seenSign[fields[2]]; dup {
+			return nil, fmt.Errorf("members %q and %q in %s share the same signing key — each member needs their own key so signatures attribute to the right person", other, fields[0], Path)
+		}
+		seenKey[fields[1]], seenSign[fields[2]] = fields[0], fields[0]
 		members = append(members, Member{Name: fields[0], Key: fields[1], SignKey: fields[2]})
 	}
 	return members, nil
@@ -86,7 +98,10 @@ func Save(members []Member) error {
 	return os.WriteFile(Path, []byte(b.String()), 0o644)
 }
 
-// Add inserts or updates a member by name and persists the list.
+// Add inserts or updates a member and persists the list. Matching an existing
+// entry by name refreshes its keys; matching by key renames it (e.g. `shenv
+// init new-name` when already registered) — one person stays one entry, since
+// Load rejects duplicate keys to keep signature attribution unambiguous.
 func Add(name, key, signKey string) error {
 	if err := validateName(name); err != nil {
 		return err
@@ -101,14 +116,35 @@ func Add(name, key, signKey string) error {
 	if err != nil {
 		return err
 	}
+
+	byName, byKey := -1, -1
 	for i, m := range members {
 		if m.Name == name {
-			members[i].Key = key // update existing
-			members[i].SignKey = signKey
-			return Save(members)
+			byName = i
+		}
+		if m.Key == key {
+			byKey = i
 		}
 	}
-	return Save(append(members, Member{Name: name, Key: key, SignKey: signKey}))
+	switch {
+	case byKey >= 0 && byName >= 0 && byKey != byName:
+		return fmt.Errorf("key already belongs to %q — `shenv remove-member` one of %q/%q first", members[byKey].Name, members[byKey].Name, name)
+	case byKey >= 0:
+		members[byKey] = Member{Name: name, Key: key, SignKey: signKey}
+	case byName >= 0:
+		members[byName].Key, members[byName].SignKey = key, signKey
+	default:
+		members = append(members, Member{Name: name, Key: key, SignKey: signKey})
+	}
+
+	// Never persist a list the next Load would reject (a sign key colliding with
+	// a different member's would brick the file until hand-edited).
+	for _, m := range members {
+		if m.Name != name && m.SignKey == signKey {
+			return fmt.Errorf("signing key already belongs to %q — each member needs their own keys", m.Name)
+		}
+	}
+	return Save(members)
 }
 
 // Remove deletes a member by name and persists the list. Removing someone only

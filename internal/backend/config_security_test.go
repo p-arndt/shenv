@@ -28,3 +28,27 @@ func TestConfigAllowsTabs(t *testing.T) {
 		t.Fatalf("tabs must stay legal in config lines: %v", err)
 	}
 }
+
+// TestBlobPathRejectsReservedTargets: config.shenv ships with the clone and the
+// file backend has no trust prompt, so a hostile `path` must not be able to
+// clobber the files shenv/git rely on — most critically .gitignore, whose loss
+// would let the plaintext .env be staged.
+func TestBlobPathRejectsReservedTargets(t *testing.T) {
+	inRepo(t)
+	for _, path := range []string{
+		".gitignore", ".env", "recipients.shenv", "config.shenv",
+		".git/config", ".git/hooks/pre-commit", ".GIT/config", "./.gitignore",
+	} {
+		writeConfig(t, "backend = file\npath = "+path+"\n")
+		if _, err := Load(); err == nil {
+			t.Fatalf("blob path %q must be rejected", path)
+		}
+	}
+	// Sanity: ordinary paths still work.
+	for _, path := range []string{"env.shenv", "secrets/env.shenv", ".env.enc"} {
+		writeConfig(t, "backend = file\npath = "+path+"\n")
+		if _, err := Load(); err != nil {
+			t.Fatalf("blob path %q should be allowed: %v", path, err)
+		}
+	}
+}
