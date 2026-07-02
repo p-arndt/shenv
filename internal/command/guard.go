@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"filippo.io/age"
 
@@ -128,7 +129,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 
 	fmt.Println("These members can decrypt the current env.shenv but are MISSING from", recipients.Path+":")
 	for _, m := range dropped {
-		fmt.Printf("    - %s  %s\n", m.Name, m.Key)
+		fmt.Printf("    - %s  %s\n", sanitizeTerm(m.Name), sanitizeTerm(m.Key))
 	}
 	fmt.Println("Pushing now will LOCK THEM OUT. If that is unintended, restore them with")
 	fmt.Println("`shenv add-member` (or `git checkout " + recipients.Path + "`) first.")
@@ -194,6 +195,19 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	return confirm(), nil
 }
 
+// sanitizeTerm strips control characters from strings that reach the terminal.
+// The dropped-member list comes from a decrypted manifest — signed, but possibly
+// by a malicious member — and a name or key carrying ANSI escape bytes could
+// otherwise rewrite the very prompt that is supposed to expose the tampering.
+func sanitizeTerm(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // rememberRecipients records the recipient set after a successful push so the next
 // push can detect changes.
 func rememberRecipients(members []recipients.Member) error {
@@ -229,19 +243,25 @@ func loadPushedRecipients() (map[string]bool, bool, error) {
 	}
 	set := map[string]bool{}
 	for line := range strings.SplitSeq(string(data), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
+		// Trim only the line ending: entries are tab-separated and a member
+		// without a sign key ends in a tab that TrimSpace would eat.
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) != "" {
 			set[line] = true
 		}
 	}
 	return set, true, nil
 }
 
-// recipientSet builds a comparable set of "name\tkey" entries, so a swapped key or
-// a renamed member both register as a change.
+// recipientSet builds a comparable set of "name\tkey\tsignkey" entries, so a
+// swapped key, a renamed member, or a replaced signing key all register as a
+// change. The signing key matters as much as the encryption key: pull trusts it
+// to verify who pushed, so swapping it in recipients.shenv would let an attacker
+// forge blobs "signed by" an existing member — that edit must hit this prompt.
 func recipientSet(members []recipients.Member) map[string]bool {
 	set := make(map[string]bool, len(members))
 	for _, m := range members {
-		set[m.Name+"\t"+m.Key] = true
+		set[m.Name+"\t"+m.Key+"\t"+m.SignKey] = true
 	}
 	return set
 }

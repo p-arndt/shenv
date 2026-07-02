@@ -35,6 +35,7 @@ func Load() ([]Member, error) {
 		return nil, err
 	}
 	var members []Member
+	seen := map[string]bool{}
 	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -44,6 +45,18 @@ func Load() ([]Member, error) {
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("malformed recipients line: %q (expected `name age1... signing-key` — `shenv whoami` prints both keys)", line)
 		}
+		// The file arrives over an untrusted channel (a clone, a merge), so the
+		// name rules enforced on `add-member` must hold on load too: a control
+		// character in a name could smuggle terminal escapes into prompts.
+		if err := validateName(fields[0]); err != nil {
+			return nil, fmt.Errorf("%s: %w", Path, err)
+		}
+		// Signer lookup during pull is by name and takes the first match — a
+		// duplicate would let a shadow entry hijack an existing member's identity.
+		if seen[fields[0]] {
+			return nil, fmt.Errorf("duplicate member %q in %s — names must be unique so signatures can't be verified against the wrong key", fields[0], Path)
+		}
+		seen[fields[0]] = true
 		members = append(members, Member{Name: fields[0], Key: fields[1], SignKey: fields[2]})
 	}
 	return members, nil

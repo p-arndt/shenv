@@ -72,6 +72,18 @@ func TestRecipientSetDetectsChanges(t *testing.T) {
 	}
 }
 
+// TestRecipientSetDetectsSignKeySwap: pull verifies signatures against the
+// signing key in recipients.shenv, so replacing only that key — name and
+// encryption key unchanged — would let an attacker forge blobs as an existing
+// member. That edit must register as a change and hit the confirmation prompt.
+func TestRecipientSetDetectsSignKeySwap(t *testing.T) {
+	base := recipientSet([]recipients.Member{{Name: "alice", Key: "age1alice", SignKey: "signalice"}})
+	swapped := recipientSet([]recipients.Member{{Name: "alice", Key: "age1alice", SignKey: "signEVIL"}})
+	if setsEqual(base, swapped) {
+		t.Fatal("a swapped signing key should be detected as a change")
+	}
+}
+
 func setsEqual(a, b map[string]bool) bool {
 	if len(a) != len(b) {
 		return false

@@ -132,8 +132,9 @@ func TestLoadBackendExecNeedsApproval(t *testing.T) {
 	}
 }
 
-// TestLoadPushedRecipientsIgnoresBlanksAndWhitespace: bookkeeping file lines are
-// trimmed and blanks skipped.
+// TestLoadPushedRecipientsIgnoresBlanks: blank lines and line endings are
+// skipped, but entries themselves are kept verbatim — a member without a sign
+// key ends in a tab that must survive the round-trip.
 func TestLoadPushedRecipientsIgnoresBlanks(t *testing.T) {
 	setup(t)
 	path, err := pushedRecipientsPath()
@@ -143,14 +144,14 @@ func TestLoadPushedRecipientsIgnoresBlanks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("\n  me\tage1self  \n\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("\nme\tage1self\tsignme\r\n\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	set, have, err := loadPushedRecipients()
 	if err != nil || !have {
 		t.Fatalf("expected a recorded set (have=%v err=%v)", have, err)
 	}
-	if !set["me\tage1self"] {
-		t.Fatalf("expected the trimmed entry to be present, got %v", set)
+	if !set["me\tage1self\tsignme"] {
+		t.Fatalf("expected the entry to be present, got %v", set)
 	}
 }

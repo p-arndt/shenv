@@ -37,6 +37,27 @@ func TestFileBackendPutRejectsSymlink(t *testing.T) {
 	}
 }
 
+// TestFileBackendPutRejectsSymlinkedDir: a committed symlink *directory* plus a
+// config path through it (`path=dir/env.shenv` with `dir` → outside the repo)
+// would redirect push's write outside the repo even though the final component
+// is a regular path — every repo-relative ancestor must be checked.
+func TestFileBackendPutRejectsSymlinkedDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege on Windows")
+	}
+	inRepo(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, "dir"); err != nil {
+		t.Fatal(err)
+	}
+	if err := (FileBackend{Path: filepath.Join("dir", "env.shenv")}).Put([]byte("blob")); err == nil {
+		t.Fatal("Put through a symlinked directory must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "env.shenv")); err == nil {
+		t.Fatal("nothing must be written outside the repo")
+	}
+}
+
 // TestFileBackendGetRejectsOversized guards the in-memory read cap.
 func TestFileBackendGetRejectsOversized(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "big.age")
