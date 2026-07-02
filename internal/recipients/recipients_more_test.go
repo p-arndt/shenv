@@ -34,15 +34,16 @@ func TestKeysRejectsInvalidKey(t *testing.T) {
 	}
 }
 
-// TestAddUpdatesExistingMember: re-adding a name rotates its key in place instead
-// of appending a duplicate line.
+// TestAddUpdatesExistingMember: re-adding a name rotates its keys in place
+// instead of appending a duplicate line.
 func TestAddUpdatesExistingMember(t *testing.T) {
 	inRepo(t)
 	first, second := testKey(t), testKey(t)
-	if err := Add("alice", first); err != nil {
+	secondSign := testSignKey(t)
+	if err := Add("alice", first, testSignKey(t)); err != nil {
 		t.Fatal(err)
 	}
-	if err := Add("alice", second); err != nil {
+	if err := Add("alice", second, secondSign); err != nil {
 		t.Fatal(err)
 	}
 	members, err := Load()
@@ -52,8 +53,8 @@ func TestAddUpdatesExistingMember(t *testing.T) {
 	if len(members) != 1 {
 		t.Fatalf("expected the entry to be updated, got %d members", len(members))
 	}
-	if members[0].Key != second {
-		t.Fatalf("key not rotated: got %q, want %q", members[0].Key, second)
+	if members[0].Key != second || members[0].SignKey != secondSign {
+		t.Fatalf("keys not rotated: got %+v", members[0])
 	}
 }
 
@@ -73,8 +74,8 @@ func TestLoadMissingFileIsEmpty(t *testing.T) {
 // TestLoadSkipsCommentsAndBlanks and rejects malformed lines.
 func TestLoadSkipsCommentsAndBlanks(t *testing.T) {
 	inRepo(t)
-	key := testKey(t)
-	content := "# a comment\n\n   \nalice " + key + "\n"
+	key, signKey := testKey(t), testSignKey(t)
+	content := "# a comment\n\n   \nalice " + key + " " + signKey + "\n"
 	if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +90,16 @@ func TestLoadSkipsCommentsAndBlanks(t *testing.T) {
 
 func TestLoadRejectsMalformedLine(t *testing.T) {
 	inRepo(t)
-	if err := os.WriteFile(Path, []byte("alice one two three\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(); err == nil {
-		t.Fatal("expected an error for a malformed recipients line")
+	for _, line := range []string{
+		"alice one two three\n",      // too many fields
+		"alice " + testKey(t) + "\n", // missing the signing key
+	} {
+		if err := os.WriteFile(Path, []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("expected an error for malformed line %q", line)
+		}
 	}
 }
 
@@ -101,7 +107,8 @@ func TestLoadRejectsMalformedLine(t *testing.T) {
 func TestSaveSortsByName(t *testing.T) {
 	inRepo(t)
 	kb, ka := testKey(t), testKey(t)
-	if err := Save([]Member{{Name: "bob", Key: kb}, {Name: "alice", Key: ka}}); err != nil {
+	sk := testSignKey(t)
+	if err := Save([]Member{{Name: "bob", Key: kb, SignKey: sk}, {Name: "alice", Key: ka, SignKey: sk}}); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(Path)

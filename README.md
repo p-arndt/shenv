@@ -20,13 +20,15 @@ sees your secrets.
 ## How it works
 
 - Your **private key** lives in `~/.shenv/key.txt`. Created **once**, used for every repo — like an SSH key.
-- Each repo has `recipients.shenv`: a list of teammates' **public keys**. Public, so it's committed.
-- `env.shenv` is the encrypted `.env`, encrypted _for all recipients at once_. Committed / shared.
+- Each repo has `recipients.shenv`: teammates' **public keys** (one for encryption, one for
+  verifying signatures). Public, so it's committed.
+- `env.shenv` is the encrypted `.env`, encrypted _for all recipients at once_ and **signed by
+  whoever pushed it**. Committed / shared.
 - `.env` is plaintext. Stays local, auto-gitignored.
 
 ```
-push:  .env  ──encrypt for every recipient──►  env.shenv   (shared)
-pull:  env.shenv  ──decrypt with your key──►  .env          (local only)
+push:  .env  ──sign with your key, encrypt for every recipient──►  env.shenv   (shared)
+pull:  env.shenv  ──decrypt, verify who signed it──►  .env                      (local only)
 ```
 
 ## Quick start
@@ -47,14 +49,14 @@ A new teammate:
 
 ```sh
 shenv keygen              # once ever, on their machine
-shenv whoami              # prints their public key: age1...
-# they send you that key (it's public — Slack/mail is fine)
+shenv whoami              # prints their public key and signing key
+# they send you both keys (they're public — Slack/mail is fine)
 ```
 
 You grant them access:
 
 ```sh
-shenv add-member alice age1...
+shenv add-member alice age1... <signing-key>
 shenv push                # re-encrypt so alice is included; commit env.shenv
 ```
 
@@ -76,11 +78,11 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 | ------------------------------- | ------------------------------------------------------------------------------------- |
 | `shenv keygen`                  | Create your keypair — no repo needed (`init` does this implicitly too)                |
 | `shenv init [name]`             | Register yourself in this repo, set up `.gitignore` (creates your keypair if missing) |
-| `shenv whoami`                  | Print your public key                                                                 |
-| `shenv add-member <name> <key>` | Add a teammate's public key (then `push`)                                             |
+| `shenv whoami`                  | Print your public key and signing key                                                 |
+| `shenv add-member <name> <key> <signing-key>` | Add a teammate's public keys (then `push`)                              |
 | `shenv remove-member <name>`    | Revoke a teammate's access (then `push` — and rotate the secrets they knew)           |
-| `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.shenv` for all members                                |
-| `shenv pull [file] [--force]`   | Decrypt `env.shenv` → `.env`; asks before clobbering local edits                        |
+| `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.shenv` for all members, signed with your key          |
+| `shenv pull [file] [--force]`   | Decrypt `env.shenv` → `.env`, verifying who pushed it; asks before clobbering local edits |
 | `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
 | `shenv remember`                | Cache your passphrase in the OS keychain so `pull` stops asking                       |
 | `shenv forget`                  | Remove the cached passphrase from the keychain                                        |
@@ -165,15 +167,27 @@ process memory. For that threat, use a hardware-backed key.
 - **Lockout protection:** every blob carries the member list it was encrypted for,
   embedded *inside* the ciphertext. Before overwriting, `push` compares that list
   with `recipients.shenv` and blocks if anyone would lose access — so a drifted or
-  never-committed recipients file can't silently lock a teammate (or yourself:
-  pushing a list without your own key warns too) out of `env.shenv`. Works with any
-  backend, since the truth travels with the blob. Deliberate removal goes through
+  never-committed recipients file can't silently lock a teammate out of `env.shenv`.
+  Locking *yourself* out is impossible: push refuses outright when your own key isn't
+  in the list (it couldn't sign a verifiable blob anyway). Works with any backend,
+  since the truth travels with the blob. Deliberate removal goes through
   `shenv remove-member` + confirming the prompt.
-- **Confidentiality, not sender authentication:** the age recipients used here hide
-  contents from non-members, but they do not prove *who* wrote `env.shenv`. Any current
-  member (or anyone who can edit the recipients list) can replace the blob; a puller
-  can't cryptographically tell who produced it. shenv assumes a small, mutually
-  trusted team — it is not a defense against a malicious member.
+- **Sender authentication — every blob is signed:** the recipient keys in
+  `recipients.shenv` are public, so without more, *anyone* could encrypt a replacement
+  `env.shenv` "for the team" (a hijacked S3 bucket or gist would be enough). That's why
+  `push` signs the payload (Ed25519, sign-then-encrypt — the signature lives *inside*
+  the ciphertext, covering the member manifest and the secrets), and `pull`/`run`
+  verify it against the signer's key in `recipients.shenv` before trusting a single
+  value. A blob that isn't signed by a *current member* is rejected outright, and every
+  pull tells you who pushed it ("signed by bob"). The signing key is derived from your
+  age key, so there is still only one secret to protect and back up.
+- **What signing does not cover:** `recipients.shenv` is the trust anchor, so someone
+  with *commit access to the repo* could swap both a key and the blob — that edit is
+  visible in git history and guarded by push's recipient-change prompt, but pull does
+  not independently detect it. Replays aren't prevented either: an old, validly-signed
+  blob can be restored by anyone with write access (enable storage versioning to spot
+  this). And shenv still assumes a small, mutually trusted team — signing authenticates
+  members to each other; it is not a defense against a malicious member.
 - `shenv run` keeps secrets out of any file, but environment variables are still
   readable by other processes running *as you* (`/proc/<pid>/environ`, `ps e`).
   It reduces the leak surface versus a file; it is not a hard boundary.

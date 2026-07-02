@@ -1,6 +1,7 @@
 package command
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,11 @@ import (
 	"shenv/internal/recipients"
 )
 
-// decryptEnv fetches the blob from the configured backend and decrypts it into
-// memory, unlocking the key via the keychain or a prompt as needed. The embedded
-// recipient manifest is stripped — callers get the bare .env content. Shared by
-// pull (writes it to disk) and run (injects it).
+// decryptEnv fetches the blob from the configured backend, decrypts it into
+// memory — unlocking the key via the keychain or a prompt as needed — and
+// verifies the pusher's signature against recipients.shenv before trusting the
+// contents. The signer line and recipient manifest are stripped — callers get
+// the bare .env content. Shared by pull (writes it to disk) and run (injects it).
 func decryptEnv() ([]byte, error) {
 	store, err := loadBackend()
 	if err != nil {
@@ -30,8 +32,46 @@ func decryptEnv() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, plaintext := recipients.ExtractManifest(payload)
+	body, err := verifySigner(payload)
+	if err != nil {
+		return nil, err
+	}
+	_, plaintext := recipients.ExtractManifest(body)
 	return plaintext, nil
+}
+
+// verifySigner checks the payload's signature against the signer's verify key
+// in recipients.shenv — the local, committed trust anchor — and returns the
+// signed body. Encryption alone can't prove who wrote the blob (the recipient
+// keys are public, so anyone could encrypt one "for the team"); the signature
+// ties it to a current member, so a replaced blob is rejected instead of
+// silently feeding attacker-chosen values into the app.
+func verifySigner(payload []byte) ([]byte, error) {
+	signer, sig, body, ok := recipients.ExtractSignature(payload)
+	if !ok {
+		return nil, fmt.Errorf("env.shenv is not signed — it was pushed by an older shenv; ask a member to run `shenv push` with this version")
+	}
+	members, err := recipients.Load()
+	if err != nil {
+		return nil, err
+	}
+	var verifyKey ed25519.PublicKey
+	for _, m := range members {
+		if m.Name == signer {
+			if verifyKey, err = crypto.ParseVerifyKey(m.SignKey); err != nil {
+				return nil, fmt.Errorf("signer %q has an invalid signing key in %s: %w", signer, recipients.Path, err)
+			}
+			break
+		}
+	}
+	if verifyKey == nil {
+		return nil, fmt.Errorf("env.shenv was signed by %q, who is not in %s — if they were just removed, a remaining member must push a fresh env.shenv; otherwise the blob may have been replaced", signer, recipients.Path)
+	}
+	if !recipients.VerifySignature(body, sig, verifyKey) {
+		return nil, fmt.Errorf("SIGNATURE VERIFICATION FAILED: env.shenv claims to be from %q but was not signed with their key — refusing to use it; the blob may have been tampered with or replaced", signer)
+	}
+	fmt.Fprintf(os.Stderr, "env.shenv verified — signed by %s.\n", signer)
+	return body, nil
 }
 
 // decryptBlob decrypts an already-fetched blob with the user's identity,

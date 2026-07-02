@@ -17,45 +17,60 @@ import (
 // pushing a recipient set that drops someone who can decrypt today, and
 // overwriting a blob you cannot read.
 
-// TestPushSelfMissingAborts: an identity exists but was never registered in this
-// repo (init ran elsewhere) — push must warn and, on decline, write nothing.
-func TestPushSelfMissingAborts(t *testing.T) {
+// TestPushSelfMissingFails: an identity exists but was never registered in this
+// repo (init ran elsewhere) — push must refuse outright: the pusher couldn't
+// decrypt the result, and nobody could verify the signature.
+func TestPushSelfMissingFails(t *testing.T) {
 	setup(t)
 	if _, err := identity.Create(""); err != nil {
 		t.Fatal(err)
 	}
 	// Only a teammate is registered — the classic "add-member but never init" trap.
-	if err := recipients.Add("alice", testPubKey(t)); err != nil {
+	if err := recipients.Add("alice", testPubKey(t), testSignKey(t)); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")
 
-	feed(t, "n\n") // decline the self-missing warning
-	if err := Push(nil); err != nil {
-		t.Fatalf("push should return nil (aborted), got %v", err)
+	feed(t, "") // must not prompt — this is a hard error, not a confirmation
+	if err := Push(nil); err == nil {
+		t.Fatal("push without being a recipient must fail")
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err == nil {
-		t.Fatal("aborted push must not write the blob")
+		t.Fatal("failed push must not write the blob")
 	}
 }
 
-func TestPushSelfMissingProceedsWhenConfirmed(t *testing.T) {
+// TestPushNoIdentityFails: without any identity there is nothing to sign with.
+func TestPushNoIdentityFails(t *testing.T) {
 	setup(t)
-	if _, err := identity.Create(""); err != nil {
-		t.Fatal(err)
-	}
-	if err := recipients.Add("alice", testPubKey(t)); err != nil {
+	if err := recipients.Add("alice", testPubKey(t), testSignKey(t)); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")
 
-	// self-missing warning, then the first-push foreign-recipient confirmation
-	feed(t, "y\ny\n")
-	if err := Push(nil); err != nil {
-		t.Fatalf("push: %v", err)
+	feed(t, "")
+	if err := Push(nil); err == nil {
+		t.Fatal("push without an identity must fail")
 	}
-	if _, err := os.Stat(backend.DefaultBlobPath); err != nil {
-		t.Fatalf("confirmed push should write the blob: %v", err)
+}
+
+// TestPushSigningKeyMismatchFails: the registered signing key differs from the
+// one derived from the identity (e.g. a regenerated key) — pushing would produce
+// a blob nobody can verify, so it must fail with a pointer to `shenv init`.
+func TestPushSigningKeyMismatchFails(t *testing.T) {
+	setup(t)
+	pub := mustInit(t)
+	if err := recipients.Add("me", pub, testSignKey(t)); err != nil { // stale/wrong sign key
+		t.Fatal(err)
+	}
+	writeEnv(t, "X=1\n")
+
+	feed(t, "")
+	if err := Push(nil); err == nil {
+		t.Fatal("push with a mismatched signing key must fail")
+	}
+	if _, err := os.Stat(backend.DefaultBlobPath); err == nil {
+		t.Fatal("failed push must not write the blob")
 	}
 }
 
@@ -65,7 +80,7 @@ func TestPushSelfMissingProceedsWhenConfirmed(t *testing.T) {
 func TestPushDroppedMemberAborts(t *testing.T) {
 	setup(t)
 	mustInit(t)
-	if err := AddMember([]string{"alice", testPubKey(t)}); err != nil {
+	if err := AddMember([]string{"alice", testPubKey(t), testSignKey(t)}); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")
@@ -99,7 +114,7 @@ func TestPushDroppedMemberAborts(t *testing.T) {
 func TestPushDroppedMemberProceedsWhenConfirmed(t *testing.T) {
 	setup(t)
 	pub := mustInit(t)
-	if err := AddMember([]string{"alice", testPubKey(t)}); err != nil {
+	if err := AddMember([]string{"alice", testPubKey(t), testSignKey(t)}); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")
@@ -127,7 +142,11 @@ func TestPushDroppedMemberProceedsWhenConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	members, _ := recipients.ExtractManifest(payload)
+	_, _, body, ok := recipients.ExtractSignature(payload)
+	if !ok {
+		t.Fatal("pushed payload must carry a signature")
+	}
+	members, _ := recipients.ExtractManifest(body)
 	if len(members) != 1 || members[0].Key != pub {
 		t.Fatalf("manifest should list only self, got %+v", members)
 	}
@@ -222,10 +241,10 @@ func TestKeygenIsIdempotent(t *testing.T) {
 
 func TestRemoveMember(t *testing.T) {
 	setup(t)
-	if err := recipients.Add("alice", testPubKey(t)); err != nil {
+	if err := recipients.Add("alice", testPubKey(t), testSignKey(t)); err != nil {
 		t.Fatal(err)
 	}
-	if err := recipients.Add("bob", testPubKey(t)); err != nil {
+	if err := recipients.Add("bob", testPubKey(t), testSignKey(t)); err != nil {
 		t.Fatal(err)
 	}
 

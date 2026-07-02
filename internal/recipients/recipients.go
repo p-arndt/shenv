@@ -10,15 +10,19 @@ import (
 	"unicode"
 
 	"filippo.io/age"
+
+	"shenv/internal/crypto"
 )
 
 // Path is the per-repo recipients file, relative to the repo root.
 const Path = "recipients.shenv"
 
-// Member is one entry: a friendly name and an age public key.
+// Member is one entry: a friendly name, an age public key for encryption, and
+// an Ed25519 verify key so pulls can check who signed the blob.
 type Member struct {
-	Name string
-	Key  string // age1... public key
+	Name    string
+	Key     string // age1... public key
+	SignKey string // base64 Ed25519 verify key
 }
 
 // Load reads the team list. A missing file is treated as empty.
@@ -37,10 +41,10 @@ func Load() ([]Member, error) {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return nil, fmt.Errorf("malformed recipients line: %q (expected `name age1...`)", line)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("malformed recipients line: %q (expected `name age1... signing-key` — `shenv whoami` prints both keys)", line)
 		}
-		members = append(members, Member{Name: fields[0], Key: fields[1]})
+		members = append(members, Member{Name: fields[0], Key: fields[1], SignKey: fields[2]})
 	}
 	return members, nil
 }
@@ -50,22 +54,25 @@ func Save(members []Member) error {
 	sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
 
 	var b strings.Builder
-	b.WriteString("# shenv recipients — public keys of team members who can decrypt.\n")
-	b.WriteString("# Safe to commit. Managed by `shenv add-member` / `shenv init`.\n")
+	b.WriteString("# shenv recipients — per member: name, age public key (encryption),\n")
+	b.WriteString("# Ed25519 verify key (signing). Safe to commit. Managed by `shenv add-member` / `shenv init`.\n")
 	for _, m := range members {
-		fmt.Fprintf(&b, "%s %s\n", m.Name, m.Key)
+		fmt.Fprintf(&b, "%s %s %s\n", m.Name, m.Key, m.SignKey)
 	}
 
 	return os.WriteFile(Path, []byte(b.String()), 0o644)
 }
 
 // Add inserts or updates a member by name and persists the list.
-func Add(name, key string) error {
+func Add(name, key, signKey string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
 	if _, err := age.ParseX25519Recipient(key); err != nil {
 		return fmt.Errorf("invalid public key %q: %w", key, err)
+	}
+	if _, err := crypto.ParseVerifyKey(signKey); err != nil {
+		return err
 	}
 	members, err := Load()
 	if err != nil {
@@ -74,10 +81,11 @@ func Add(name, key string) error {
 	for i, m := range members {
 		if m.Name == name {
 			members[i].Key = key // update existing
+			members[i].SignKey = signKey
 			return Save(members)
 		}
 	}
-	return Save(append(members, Member{Name: name, Key: key}))
+	return Save(append(members, Member{Name: name, Key: key, SignKey: signKey}))
 }
 
 // Remove deletes a member by name and persists the list. Removing someone only

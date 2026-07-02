@@ -28,15 +28,19 @@ func Init(args []string) error {
 	}
 
 	pub, err := identity.PublicKey()
+	var signPub string
 	if err != nil {
-		if pub, err = createIdentity(); err != nil {
+		if pub, signPub, err = createIdentity(); err != nil {
 			return err
 		}
 	} else {
 		fmt.Printf("Using your existing identity. Your public key:\n  %s\n\n", pub)
+		if signPub, err = identity.VerifyKey(unlocker(pub)); err != nil {
+			return err
+		}
 	}
 
-	if err := recipients.Add(name, pub); err != nil {
+	if err := recipients.Add(name, pub, signPub); err != nil {
 		return err
 	}
 	fmt.Printf("Registered you as %q in %s\n", name, recipients.Path)
@@ -59,7 +63,7 @@ func Keygen(args []string) error {
 		fmt.Printf("You already have an identity at %s. Your public key:\n  %s\n", path, pub)
 		return nil
 	}
-	if _, err := createIdentity(); err != nil {
+	if _, _, err := createIdentity(); err != nil {
 		return err
 	}
 	fmt.Println("\nNext: run `shenv init [name]` inside a repo to register yourself there.")
@@ -67,15 +71,19 @@ func Keygen(args []string) error {
 }
 
 // createIdentity prompts for a passphrase and generates the global keypair,
-// returning the new public key. Shared by init and keygen.
-func createIdentity() (string, error) {
+// returning the new public key and public signing key. Shared by init and keygen.
+func createIdentity() (string, string, error) {
 	passphrase, err := readNewPassphrase()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	id, err := identity.Create(passphrase)
 	if err != nil {
-		return "", err
+		return "", "", err
+	}
+	signKey, err := crypto.DeriveSigningKey(id)
+	if err != nil {
+		return "", "", err
 	}
 	pub := id.Recipient().String()
 	fmt.Printf("Created identity. Your public key:\n  %s\n\n", pub)
@@ -83,27 +91,34 @@ func createIdentity() (string, error) {
 		fmt.Println("Your private key is encrypted at rest with your passphrase.")
 		offerToRemember(pub, passphrase)
 	}
-	return pub, nil
+	return pub, crypto.VerifyKeyString(signKey), nil
 }
 
-// Whoami prints the user's public key — the thing they share to get added elsewhere.
-// It never needs the passphrase, even for an encrypted key.
+// Whoami prints the user's public keys — what they share to get added elsewhere.
+// It never needs the passphrase for an encrypted key, except once for key files
+// from before signing existed (see identity.VerifyKey).
 func Whoami(args []string) error {
 	pub, err := identity.PublicKey()
 	if err != nil {
 		return err
 	}
-	fmt.Println(pub)
+	signPub, err := identity.VerifyKey(unlocker(pub))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("public key : %s\nsigning key: %s\n", pub, signPub)
+	fmt.Printf("\nA teammate grants you access with:\n  shenv add-member <your-name> %s %s\n", pub, signPub)
 	return nil
 }
 
-// AddMember records another dev's public key so they can decrypt after the next push.
+// AddMember records another dev's public keys so they can decrypt — and their
+// pushes can be verified — after the next push.
 func AddMember(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("usage: shenv add-member <name> <age1-public-key>")
+	if len(args) != 3 {
+		return fmt.Errorf("usage: shenv add-member <name> <age1-public-key> <signing-key>\n(the new member gets both keys from `shenv whoami`)")
 	}
-	name, key := args[0], args[1]
-	if err := recipients.Add(name, key); err != nil {
+	name, key, signKey := args[0], args[1], args[2]
+	if err := recipients.Add(name, key, signKey); err != nil {
 		return err
 	}
 	fmt.Printf("Added %q. Run `shenv push` to re-encrypt so they can pull.\n", name)
@@ -157,16 +172,29 @@ func Push(args []string) error {
 		return err
 	}
 
+	// Push signs the payload, and the signature is only verifiable if the pusher
+	// is a member — so both an identity and a registration here are required.
+	// This also closes the classic trap of encrypting for a list without your own
+	// key and locking yourself out (e.g. `init` was run in another directory).
 	selfKey, err := identity.PublicKey()
 	if err != nil {
-		selfKey = "" // no identity yet: every recipient counts as foreign
+		return fmt.Errorf("push signs env.shenv with your key, but you have no identity yet — run `shenv init [name]` first")
+	}
+	self := memberByKey(members, selfKey)
+	if self == nil {
+		return fmt.Errorf("your key is not in %s — after this push you could not decrypt env.shenv, and nobody could verify your signature; register yourself first with `shenv init [name]`", recipients.Path)
 	}
 
-	// Encrypting for a list that doesn't include yourself locks you out of your
-	// own secrets — almost always a setup mistake (e.g. `init` was run elsewhere).
-	if proceed := confirmSelfIncluded(members, selfKey); !proceed {
-		fmt.Println("Aborted — add yourself first, e.g. `shenv init`.")
-		return nil
+	id, err := identity.Load(unlocker(selfKey))
+	if err != nil {
+		return err
+	}
+	signKey, err := crypto.DeriveSigningKey(id)
+	if err != nil {
+		return err
+	}
+	if verify := crypto.VerifyKeyString(signKey); self.SignKey != verify {
+		return fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then push again", recipients.Path, self.Name)
 	}
 
 	store, err := loadBackend()
@@ -178,7 +206,7 @@ func Push(args []string) error {
 	// the recipients package). Refuse to silently push a new blob that would lock
 	// out someone who can decrypt today — the drift that causes this (a recipients
 	// file that was never committed, a bad merge) is invisible in the file itself.
-	if proceed, err := confirmNoLockout(store, members); err != nil {
+	if proceed, err := confirmNoLockout(store, members, id); err != nil {
 		return err
 	} else if !proceed {
 		fmt.Println("Aborted — nobody was locked out.")
@@ -195,7 +223,7 @@ func Push(args []string) error {
 		return nil
 	}
 
-	blob, err := crypto.EncryptBytes(recipients.EmbedManifest(plaintext, members), keys)
+	blob, err := crypto.EncryptBytes(recipients.SealPayload(plaintext, members, self.Name, signKey), keys)
 	if err != nil {
 		return err
 	}
@@ -206,7 +234,17 @@ func Push(args []string) error {
 	if err := rememberRecipients(members); err != nil {
 		return err
 	}
-	fmt.Printf("Encrypted %s → %s for %d member(s).\n", in, store, len(members))
+	fmt.Printf("Encrypted %s → %s for %d member(s), signed as %q.\n", in, store, len(members), self.Name)
+	return nil
+}
+
+// memberByKey finds the member entry with the given age public key.
+func memberByKey(members []recipients.Member, key string) *recipients.Member {
+	for i := range members {
+		if members[i].Key == key {
+			return &members[i]
+		}
+	}
 	return nil
 }
 

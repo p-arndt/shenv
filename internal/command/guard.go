@@ -9,7 +9,10 @@ import (
 	"sort"
 	"strings"
 
+	"filippo.io/age"
+
 	"shenv/internal/backend"
+	"shenv/internal/crypto"
 	"shenv/internal/recipients"
 )
 
@@ -66,27 +69,6 @@ func pushedRecipientsPath() (string, error) {
 	return filepath.Join(dir, hex.EncodeToString(sum[:])+".recipients"), nil
 }
 
-// confirmSelfIncluded warns when the user's own key is missing from the list they
-// are about to encrypt for — after that push they could no longer decrypt their
-// own secrets. This happens when `init` was run in a different directory (only
-// `add-member` was run here) or the recipients file was replaced. An empty
-// selfKey (no identity yet) is left to confirmRecipients' first-push prompt.
-func confirmSelfIncluded(members []recipients.Member, selfKey string) bool {
-	if selfKey == "" {
-		return true
-	}
-	for _, m := range members {
-		if m.Key == selfKey {
-			return true
-		}
-	}
-	fmt.Printf("WARNING: your own key is not in %s.\n", recipients.Path)
-	fmt.Println("After this push YOU will not be able to decrypt env.shenv yourself.")
-	fmt.Println("Add yourself first with `shenv init [name]`.")
-	fmt.Print("Push anyway? [y/N] ")
-	return confirm()
-}
-
 // confirmNoLockout compares the members embedded in the current blob (who can
 // decrypt today) against the set about to be encrypted for, and turns a silent
 // lockout into a blocking prompt. Unlike confirmRecipients this needs no local
@@ -94,13 +76,13 @@ func confirmSelfIncluded(members []recipients.Member, selfKey string) bool {
 // happened on any machine. A blob that exists but can't be decrypted with this
 // identity gets its own warning: overwriting a blob you can't read likely locks
 // out everyone who can.
-func confirmNoLockout(store backend.Backend, cur []recipients.Member) (bool, error) {
+func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Identity) (bool, error) {
 	prevBlob, err := store.Get()
 	if err != nil {
 		return true, nil // no existing blob — first push, nothing to guard
 	}
 
-	payload, err := decryptBlob(prevBlob)
+	payload, err := crypto.DecryptBytes(prevBlob, id)
 	if err != nil {
 		fmt.Println("An encrypted env.shenv already exists, but your key cannot decrypt it.")
 		fmt.Println("Overwriting it would likely LOCK OUT everyone who can read it today.")
@@ -109,7 +91,8 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member) (bool, err
 		return confirm(), nil
 	}
 
-	prev, _ := recipients.ExtractManifest(payload)
+	_, _, body, _ := recipients.ExtractSignature(payload)
+	prev, _ := recipients.ExtractManifest(body)
 	if len(prev) == 0 {
 		return true, nil // blob from an older shenv without a manifest
 	}

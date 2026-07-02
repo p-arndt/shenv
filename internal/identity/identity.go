@@ -22,6 +22,10 @@ const armorMarker = "-----BEGIN AGE ENCRYPTED FILE-----"
 // so `whoami` can work without unlocking an encrypted key.
 const pubKeyComment = "# public key:"
 
+// signKeyComment prefixes the plaintext verify-key line, kept for the same
+// reason: `whoami` must print it without a passphrase prompt.
+const signKeyComment = "# signing key:"
+
 // PassphraseFunc is called only when an encrypted key needs to be unlocked.
 type PassphraseFunc func() (string, error)
 
@@ -100,6 +104,76 @@ func PublicKey() (string, error) {
 	return id.Recipient().String(), nil
 }
 
+// VerifyKey returns the user's public signing key. Like PublicKey it avoids the
+// passphrase where possible: a plaintext key derives it directly, an encrypted
+// key reads it from the comment. Key files written before signing existed lack
+// that comment; then ask unlocks the key once and the comment is added so the
+// next call is silent again.
+func VerifyKey(ask PassphraseFunc) (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("no identity found — run `shenv init` first")
+		}
+		return "", err
+	}
+
+	if !isEncrypted(data) {
+		id, err := parsePlaintextKey(data)
+		if err != nil {
+			return "", err
+		}
+		return deriveVerifyKey(id)
+	}
+
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), signKeyComment); ok {
+			return strings.TrimSpace(after), nil
+		}
+	}
+
+	id, err := Load(ask)
+	if err != nil {
+		return "", err
+	}
+	verify, err := deriveVerifyKey(id)
+	if err != nil {
+		return "", err
+	}
+	// Best-effort self-heal: record the comment so future calls skip the unlock.
+	// Failing to write it is not fatal — the derived key is already in hand.
+	if healed, ok := insertSignComment(data, verify); ok {
+		_ = os.WriteFile(path, healed, 0o600)
+	}
+	return verify, nil
+}
+
+// deriveVerifyKey computes the encoded public signing key for an identity.
+func deriveVerifyKey(id *age.X25519Identity) (string, error) {
+	key, err := crypto.DeriveSigningKey(id)
+	if err != nil {
+		return "", err
+	}
+	return crypto.VerifyKeyString(key), nil
+}
+
+// insertSignComment places the signing-key comment right after the public-key
+// comment. ok is false if no public-key line was found to anchor on.
+func insertSignComment(data []byte, verify string) ([]byte, bool) {
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), pubKeyComment) {
+			withComment := append(lines[:i+1:i+1], fmt.Sprintf("%s %s", signKeyComment, verify))
+			return []byte(strings.Join(append(withComment, lines[i+1:]...), "\n")), true
+		}
+	}
+	return nil, false
+}
+
 // Create generates a fresh keypair and writes it to the global key file. If
 // passphrase is non-empty, the private key is encrypted at rest. It refuses to
 // overwrite an existing key.
@@ -150,13 +224,18 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 }
 
 // renderKeyFile builds the on-disk contents for a key, encrypting the secret when
-// a passphrase is given. The public key is always kept as a plaintext comment.
+// a passphrase is given. The public key and the public signing key are always
+// kept as plaintext comments.
 func renderKeyFile(id *age.X25519Identity, passphrase string) ([]byte, error) {
 	pub := id.Recipient().String()
+	verify, err := deriveVerifyKey(id)
+	if err != nil {
+		return nil, err
+	}
 	if passphrase == "" {
 		return fmt.Appendf(nil,
-			"# shenv identity — keep this file secret, never share or commit it\n%s %s\n%s\n",
-			pubKeyComment, pub, id.String()), nil
+			"# shenv identity — keep this file secret, never share or commit it\n%s %s\n%s %s\n%s\n",
+			pubKeyComment, pub, signKeyComment, verify, id.String()), nil
 	}
 
 	blob, err := crypto.EncryptWithPassphrase([]byte(id.String()), passphrase)
@@ -164,8 +243,8 @@ func renderKeyFile(id *age.X25519Identity, passphrase string) ([]byte, error) {
 		return nil, err
 	}
 	header := fmt.Sprintf(
-		"# shenv identity (passphrase-encrypted) — keep secret; needs your passphrase to use\n%s %s\n",
-		pubKeyComment, pub)
+		"# shenv identity (passphrase-encrypted) — keep secret; needs your passphrase to use\n%s %s\n%s %s\n",
+		pubKeyComment, pub, signKeyComment, verify)
 	return append([]byte(header), blob...), nil
 }
 

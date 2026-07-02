@@ -71,7 +71,7 @@ func TestPushCustomInputFile(t *testing.T) {
 func TestPushForeignRecipientAborts(t *testing.T) {
 	setup(t)
 	mustInit(t)
-	if err := AddMember([]string{"alice", testPubKey(t)}); err != nil {
+	if err := AddMember([]string{"alice", testPubKey(t), testSignKey(t)}); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")
@@ -88,7 +88,7 @@ func TestPushForeignRecipientAborts(t *testing.T) {
 func TestPushForeignRecipientProceeds(t *testing.T) {
 	setup(t)
 	mustInit(t)
-	if err := AddMember([]string{"alice", testPubKey(t)}); err != nil {
+	if err := AddMember([]string{"alice", testPubKey(t), testSignKey(t)}); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "X=1\n")

@@ -15,11 +15,12 @@ const usage = `shenv — share encrypted .env files across a team
 Usage:
   shenv keygen                      Create your keypair (no repo needed)
   shenv init [name]                 Register yourself in this repo (creates your keypair if missing)
-  shenv whoami                      Print your public key (share it to get added)
-  shenv add-member <name> <key>     Grant a teammate access (then push)
+  shenv whoami                      Print your public keys (share them to get added)
+  shenv add-member <name> <key> <signing-key>
+                                    Grant a teammate access (then push)
   shenv remove-member <name>        Revoke a teammate's access (then push)
-  shenv push [file]                 Encrypt .env → env.shenv for all members
-  shenv pull [file] [--force]       Decrypt env.shenv → .env
+  shenv push [file]                 Encrypt .env → env.shenv for all members, signed with your key
+  shenv pull [file] [--force]       Decrypt env.shenv → .env (verifies who pushed it)
   shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase

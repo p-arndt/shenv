@@ -142,7 +142,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	whoOut, _, code := run("", "whoami")
-	if code != 0 || !strings.HasPrefix(strings.TrimSpace(whoOut), "age1") {
+	if code != 0 || !strings.Contains(whoOut, "age1") || !strings.Contains(whoOut, "signing key") {
 		t.Fatalf("whoami: code=%d out=%q", code, whoOut)
 	}
 

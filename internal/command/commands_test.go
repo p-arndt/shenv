@@ -1,6 +1,9 @@
 package command
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -19,6 +22,16 @@ func testPubKey(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return id.Recipient().String()
+}
+
+// testSignKey returns a freshly generated, valid base64 Ed25519 verify key.
+func testSignKey(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.RawStdEncoding.EncodeToString(pub)
 }
 
 func TestInitPlaintext(t *testing.T) {
@@ -122,16 +135,20 @@ func TestInitReusesExistingKey(t *testing.T) {
 	}
 }
 
-func TestWhoamiPrintsPublicKey(t *testing.T) {
+func TestWhoamiPrintsBothKeys(t *testing.T) {
 	setup(t)
 	pub := mustInit(t)
+	signPub, err := identity.VerifyKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	out := captureStdout(t, func() {
 		if err := Whoami(nil); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if strings.TrimSpace(out) != pub {
-		t.Fatalf("whoami printed %q, want %q", strings.TrimSpace(out), pub)
+	if !strings.Contains(out, pub) || !strings.Contains(out, signPub) {
+		t.Fatalf("whoami must print both keys (%q, %q), got:\n%s", pub, signPub, out)
 	}
 }
 
@@ -144,12 +161,12 @@ func TestWhoamiNoIdentity(t *testing.T) {
 
 func TestAddMember(t *testing.T) {
 	setup(t)
-	key := testPubKey(t)
-	if err := AddMember([]string{"alice", key}); err != nil {
+	key, signKey := testPubKey(t), testSignKey(t)
+	if err := AddMember([]string{"alice", key, signKey}); err != nil {
 		t.Fatalf("add-member: %v", err)
 	}
 	members, _ := recipients.Load()
-	if len(members) != 1 || members[0].Name != "alice" || members[0].Key != key {
+	if len(members) != 1 || members[0].Name != "alice" || members[0].Key != key || members[0].SignKey != signKey {
 		t.Fatalf("unexpected members: %+v", members)
 	}
 }
@@ -159,7 +176,8 @@ func TestAddMemberBadArgs(t *testing.T) {
 	for _, args := range [][]string{
 		nil,
 		{"only-one"},
-		{"a", "b", "c"},
+		{"name", "key-but-no-signing-key"},
+		{"a", "b", "c", "d"},
 	} {
 		if err := AddMember(args); err == nil {
 			t.Errorf("args %v should be rejected", args)
@@ -169,8 +187,11 @@ func TestAddMemberBadArgs(t *testing.T) {
 
 func TestAddMemberInvalidKey(t *testing.T) {
 	setup(t)
-	if err := AddMember([]string{"alice", "not-a-key"}); err == nil {
-		t.Fatal("an invalid key should be rejected")
+	if err := AddMember([]string{"alice", "not-a-key", testSignKey(t)}); err == nil {
+		t.Fatal("an invalid public key should be rejected")
+	}
+	if err := AddMember([]string{"alice", testPubKey(t), "not-a-signing-key!"}); err == nil {
+		t.Fatal("an invalid signing key should be rejected")
 	}
 }
 

@@ -86,7 +86,11 @@ func mustInit(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recipients.Add("me", pub); err != nil {
+	signPub, err := identity.VerifyKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recipients.Add("me", pub, signPub); err != nil {
 		t.Fatalf("register recipient: %v", err)
 	}
 	return pub
