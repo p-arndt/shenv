@@ -6,7 +6,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -17,6 +20,21 @@ import (
 	"runtime"
 	"testing"
 )
+
+// withTestReleaseKey generates a throwaway release keypair, points the embedded
+// verify key at it for the duration of the test, and returns a signer matching
+// what the release workflow produces.
+func withTestReleaseKey(t *testing.T) func(name string, content []byte) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := releaseVerifyKey
+	t.Cleanup(func() { releaseVerifyKey = orig })
+	releaseVerifyKey = base64.RawStdEncoding.EncodeToString(pub)
+	return func(name string, content []byte) string { return SignChecksums(priv, name, content) }
+}
 
 func TestCompareVersions(t *testing.T) {
 	cases := []struct {
@@ -194,6 +212,8 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 	archiveName := ArchiveName(version, goos, goarch)
 	sum := sha256.Sum256(archive)
 	checksums := fmt.Sprintf("%s  %s\n", hex.EncodeToString(sum[:]), archiveName)
+	sign := withTestReleaseKey(t)
+	sig := sign(ChecksumsName(version), []byte(checksums))
 
 	mux := http.NewServeMux()
 	var base string
@@ -203,12 +223,14 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 			Assets: []Asset{
 				{Name: archiveName, URL: base + "/dl/archive"},
 				{Name: ChecksumsName(version), URL: base + "/dl/sums"},
+				{Name: SigName(version), URL: base + "/dl/sig"},
 			},
 		}
 		json.NewEncoder(w).Encode(rel)
 	})
 	mux.HandleFunc("/dl/archive", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
 	mux.HandleFunc("/dl/sums", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(checksums)) })
+	mux.HandleFunc("/dl/sig", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(sig)) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	base = srv.URL
@@ -280,6 +302,11 @@ func TestSelfUpdateChecksumMismatch(t *testing.T) {
 	}
 	version := "9.9.9"
 	archiveName := ArchiveName(version, goos, goarch)
+	// Deliberately wrong checksum — but validly signed, so this test still
+	// exercises the checksum layer rather than failing earlier at the signature.
+	sign := withTestReleaseKey(t)
+	badSums := fmt.Sprintf("%s  %s\n", "0000000000000000000000000000000000000000000000000000000000000000", archiveName)
+	sig := sign(ChecksumsName(version), []byte(badSums))
 
 	mux := http.NewServeMux()
 	var base string
@@ -287,13 +314,12 @@ func TestSelfUpdateChecksumMismatch(t *testing.T) {
 		json.NewEncoder(w).Encode(Release{Tag: "v" + version, Assets: []Asset{
 			{Name: archiveName, URL: base + "/dl/archive"},
 			{Name: ChecksumsName(version), URL: base + "/dl/sums"},
+			{Name: SigName(version), URL: base + "/dl/sig"},
 		}})
 	})
 	mux.HandleFunc("/dl/archive", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
-	// Deliberately wrong checksum.
-	mux.HandleFunc("/dl/sums", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s  %s\n", "0000000000000000000000000000000000000000000000000000000000000000", archiveName)
-	})
+	mux.HandleFunc("/dl/sums", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(badSums)) })
+	mux.HandleFunc("/dl/sig", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(sig)) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	base = srv.URL

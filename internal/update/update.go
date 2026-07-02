@@ -466,6 +466,10 @@ func (c *Client) SelfUpdate(ctx context.Context, current string, checkOnly bool)
 	if err != nil {
 		return nil, err
 	}
+	sigAsset, err := findAsset(rel.Assets, SigName(latest))
+	if err != nil {
+		return nil, fmt.Errorf("release is not signed: %w — refusing to update", err)
+	}
 
 	archive, err := c.download(ctx, archiveAsset.URL, "release archive")
 	if err != nil {
@@ -473,6 +477,16 @@ func (c *Client) SelfUpdate(ctx context.Context, current string, checkOnly bool)
 	}
 	sums, err := c.download(ctx, sumsAsset.URL, "checksums file")
 	if err != nil {
+		return nil, err
+	}
+	sig, err := c.download(ctx, sigAsset.URL, "checksums signature")
+	if err != nil {
+		return nil, err
+	}
+	// Order matters: the signature authenticates the checksums file, and only
+	// then does the checksums file authenticate the archive. A checksum match
+	// against an unverified checksums file proves nothing.
+	if err := VerifyChecksumsSignature(ChecksumsName(latest), sums, sig); err != nil {
 		return nil, err
 	}
 	if err := verifyChecksum(archive, archiveName, sums); err != nil {

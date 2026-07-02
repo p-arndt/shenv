@@ -95,11 +95,15 @@ shenv update            # download the latest release, verify its SHA-256, swap 
 shenv update --check    # just tell me if a newer version is out
 ```
 
-`update` pulls the archive for your platform from GitHub Releases, checks it
-against the published `checksums.txt` before touching anything, and replaces the
-running binary in place. It refuses to run on a `dev`/source build (nothing to
-compare against) and on install locations you can't write to (it tells you to
-reinstall or elevate).
+`update` pulls the archive for your platform from GitHub Releases and verifies it
+twice before touching anything: the checksums file must carry a valid **Ed25519
+signature from the project's release key** (the public key is embedded in the
+binary; the private key never leaves the release pipeline's secret), and only
+then does the archive's SHA-256 have to match it. An unsigned release, a
+re-signed checksums file, or an old signed release replayed under a newer
+version is refused outright. It also refuses to run on a `dev`/source build
+(nothing to compare against) and on install locations you can't write to (it
+tells you to reinstall or elevate).
 
 shenv also shows a one-line _"a newer version is available"_ hint on stderr at
 most once a day. It never installs anything on its own — set
@@ -116,6 +120,7 @@ go test ./...
 
 ```
 cmd/shenv/          # entry point: arg dispatch + usage
+cmd/release-sign/   # release tooling: sign/verify the checksums file (never shipped)
 internal/
   identity/         # the global ~/.shenv/key.txt keypair (+ optional passphrase)
   recipients/       # the per-repo recipients.shenv list
@@ -123,7 +128,7 @@ internal/
   keystore/         # optional OS-keychain passphrase cache
   dotenv/           # minimal .env parser (for `run`)
   backend/          # where the encrypted blob lives (file | exec)
-  update/           # self-update from GitHub Releases + "new version" notice
+  update/           # signed self-update from GitHub Releases + "new version" notice
   command/          # subcommands wiring the above together
 ```
 

@@ -106,6 +106,25 @@ jobs:
           (cd dist && sha256sum shenv_*.* > "shenv_${VERSION}_checksums.txt")
           ls -l dist
 
+      - name: Sign checksums
+        # `shenv update` refuses unsigned releases, so a release without this
+        # signature would strand every shipped updater — fail loudly instead of
+        # publishing one. The private key exists only in this secret (and the
+        # maintainer's offline backup); the matching public key is embedded in
+        # the binary via internal/update/sign.go.
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY secret is not set — shenv update requires signed releases." >&2
+            echo "Generate one with: go run ./cmd/release-sign gen <keyfile>, then gh secret set RELEASE_SIGNING_KEY < <keyfile>" >&2
+            exit 1
+          fi
+          go run ./cmd/release-sign sign "dist/shenv_${VERSION}_checksums.txt"
+
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
