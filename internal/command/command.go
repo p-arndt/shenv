@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"shenv/internal/backend"
@@ -288,6 +289,12 @@ func Pull(args []string) error {
 		}
 	}
 
+	// The tool's core promise is that plaintext never lands in the repo — that
+	// must hold for `pull --out .env.production` just as for the default .env.
+	if err := ensureIgnored(out); err != nil {
+		return err
+	}
+
 	if err := os.WriteFile(out, plaintext, 0o600); err != nil {
 		return err
 	}
@@ -300,7 +307,34 @@ func Pull(args []string) error {
 }
 
 // ensureGitignore makes sure .env is ignored and env.shenv is not.
+// The "!" entry explicitly un-ignores the blob in case a broad rule hides it.
 func ensureGitignore() error {
+	_, err := appendGitignore(defaultEnvFile, "!"+backend.DefaultBlobPath)
+	return err
+}
+
+// ensureIgnored guards a pull target: decrypted plaintext must never be
+// committable, so any repo-local output path is added to .gitignore before the
+// secrets are written. Paths outside the repo (absolute, `..`-escaping) can't
+// be committed from here and are left alone. Failing to update .gitignore is
+// fatal — better no plaintext than committable plaintext.
+func ensureIgnored(path string) error {
+	if !filepath.IsLocal(path) {
+		return nil
+	}
+	added, err := appendGitignore(filepath.ToSlash(path))
+	if err != nil {
+		return fmt.Errorf("could not add %s to .gitignore (refusing to write plaintext that git could commit): %w", path, err)
+	}
+	if added {
+		fmt.Printf("Added %s to .gitignore so the decrypted file can't be committed.\n", path)
+	}
+	return nil
+}
+
+// appendGitignore appends the entries not already present (as exact lines) in
+// .gitignore under a "# shenv" block, reporting whether anything was added.
+func appendGitignore(entries ...string) (bool, error) {
 	const path = ".gitignore"
 	existing, _ := os.ReadFile(path)
 	lines := map[string]bool{}
@@ -309,25 +343,25 @@ func ensureGitignore() error {
 	}
 
 	var add []string
-	if !lines[defaultEnvFile] {
-		add = append(add, defaultEnvFile)
-	}
-	// Explicitly un-ignore the blob in case a broad rule hides it.
-	if !lines["!"+backend.DefaultBlobPath] {
-		add = append(add, "!"+backend.DefaultBlobPath)
+	for _, e := range entries {
+		if !lines[e] {
+			add = append(add, e)
+		}
 	}
 	if len(add) == 0 {
-		return nil
+		return false, nil
 	}
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer f.Close()
 	block := "\n# shenv\n" + strings.Join(add, "\n") + "\n"
-	_, err = f.WriteString(block)
-	return err
+	if _, err := f.WriteString(block); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // confirm reads a y/n answer from stdin.

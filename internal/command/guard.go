@@ -75,7 +75,8 @@ func pushedRecipientsPath() (string, error) {
 // state — the truth travels inside the blob — so it protects against drift that
 // happened on any machine. A blob that exists but can't be decrypted with this
 // identity gets its own warning: overwriting a blob you can't read likely locks
-// out everyone who can.
+// out everyone who can. A blob whose signature can't be verified gets one too:
+// its manifest can't be trusted, so the lockout comparison is skipped.
 func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Identity) (bool, error) {
 	prevBlob, err := store.Get()
 	if err != nil {
@@ -91,10 +92,24 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 		return confirm(), nil
 	}
 
-	_, _, body, _ := recipients.ExtractSignature(payload)
+	// The manifest is only as trustworthy as its signature: the recipient keys
+	// are public, so anyone who can write to the backend could plant a
+	// decryptable blob with a fabricated member list and steer — or suppress —
+	// the lockout warning. Verify before trusting it; on failure the guard
+	// degrades to a blunt overwrite prompt. Legitimate paths land here too (a
+	// blob from a pre-signing shenv, a last pusher who has since been removed),
+	// hence the soft wording.
+	_, body, err := verifiedBody(payload)
+	if err != nil {
+		fmt.Println("The existing env.shenv can't be verified, so who can decrypt it today is")
+		fmt.Println("unknown and the lockout check is skipped:")
+		fmt.Printf("    %v\n", err)
+		fmt.Print("Overwrite it? [y/N] ")
+		return confirm(), nil
+	}
 	prev, _ := recipients.ExtractManifest(body)
 	if len(prev) == 0 {
-		return true, nil // blob from an older shenv without a manifest
+		return true, nil // defensive: a signed blob always carries a manifest
 	}
 
 	curKeys := make(map[string]bool, len(cur))

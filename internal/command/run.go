@@ -47,31 +47,41 @@ func decryptEnv() ([]byte, error) {
 // ties it to a current member, so a replaced blob is rejected instead of
 // silently feeding attacker-chosen values into the app.
 func verifySigner(payload []byte) ([]byte, error) {
+	signer, body, err := verifiedBody(payload)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "env.shenv verified — signed by %s.\n", signer)
+	return body, nil
+}
+
+// verifiedBody performs the actual signature check, silently, so push's
+// lockout guard can reuse it without printing pull's confirmation line.
+func verifiedBody(payload []byte) (string, []byte, error) {
 	signer, sig, body, ok := recipients.ExtractSignature(payload)
 	if !ok {
-		return nil, fmt.Errorf("env.shenv is not signed — it was pushed by an older shenv; ask a member to run `shenv push` with this version")
+		return "", nil, fmt.Errorf("env.shenv is not signed — it was pushed by an older shenv; ask a member to run `shenv push` with this version")
 	}
 	members, err := recipients.Load()
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	var verifyKey ed25519.PublicKey
 	for _, m := range members {
 		if m.Name == signer {
 			if verifyKey, err = crypto.ParseVerifyKey(m.SignKey); err != nil {
-				return nil, fmt.Errorf("signer %q has an invalid signing key in %s: %w", signer, recipients.Path, err)
+				return "", nil, fmt.Errorf("signer %q has an invalid signing key in %s: %w", signer, recipients.Path, err)
 			}
 			break
 		}
 	}
 	if verifyKey == nil {
-		return nil, fmt.Errorf("env.shenv was signed by %q, who is not in %s — if they were just removed, a remaining member must push a fresh env.shenv; otherwise the blob may have been replaced", signer, recipients.Path)
+		return "", nil, fmt.Errorf("env.shenv was signed by %q, who is not in %s — if they were just removed, a remaining member must push a fresh env.shenv; otherwise the blob may have been replaced", signer, recipients.Path)
 	}
 	if !recipients.VerifySignature(body, sig, verifyKey) {
-		return nil, fmt.Errorf("SIGNATURE VERIFICATION FAILED: env.shenv claims to be from %q but was not signed with their key — refusing to use it; the blob may have been tampered with or replaced", signer)
+		return "", nil, fmt.Errorf("SIGNATURE VERIFICATION FAILED: env.shenv claims to be from %q but was not signed with their key — refusing to use it; the blob may have been tampered with or replaced", signer)
 	}
-	fmt.Fprintf(os.Stderr, "env.shenv verified — signed by %s.\n", signer)
-	return body, nil
+	return signer, body, nil
 }
 
 // decryptBlob decrypts an already-fetched blob with the user's identity,

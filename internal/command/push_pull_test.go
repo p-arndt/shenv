@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"shenv/internal/backend"
@@ -197,6 +198,52 @@ func TestPullCustomOutTarget(t *testing.T) {
 		if err != nil || string(got) != "K=v\n" {
 			t.Fatalf("%s: got %q err %v", f, got, err)
 		}
+	}
+}
+
+// TestPullEnsuresOutputGitignored: pull must never leave decrypted plaintext
+// where git could commit it — every repo-local output path is added to
+// .gitignore before the secrets are written.
+func TestPullEnsuresOutputGitignored(t *testing.T) {
+	setup(t)
+	mustInit(t)
+	writeEnv(t, "K=v\n")
+	feed(t, "y\n")
+	if err := Push(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	feed(t, "y\n")
+	if err := Pull([]string{"--out", ".env.production"}); err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+
+	ignore, err := os.ReadFile(".gitignore")
+	if err != nil {
+		t.Fatalf("pull must create .gitignore for a custom target: %v", err)
+	}
+	found := false
+	for _, line := range strings.Split(string(ignore), "\n") {
+		if strings.TrimSpace(line) == ".env.production" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf(".gitignore must list the pull target, got:\n%s", ignore)
+	}
+
+	// A second pull to the same target must not duplicate the entry.
+	feed(t, "y\n")
+	if err := Pull([]string{"--out", ".env.production"}); err != nil {
+		t.Fatalf("second pull: %v", err)
+	}
+	again, err := os.ReadFile(".gitignore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(again), ".env.production") != 1 {
+		t.Fatalf(".gitignore entry duplicated:\n%s", again)
 	}
 }
 

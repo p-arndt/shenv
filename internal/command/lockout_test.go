@@ -191,9 +191,10 @@ func TestPushForeignBlobWarns(t *testing.T) {
 	}
 }
 
-// TestPushLegacyBlobSkipsLockoutCheck: blobs from older shenv versions carry no
-// manifest — push must not prompt about lockout (nothing to compare against).
-func TestPushLegacyBlobSkipsLockoutCheck(t *testing.T) {
+// TestPushUnsignedBlobPrompts: an unsigned blob (older shenv, or planted by
+// anyone — the recipient keys are public) has no trustworthy manifest, so push
+// must fall back to a blunt overwrite prompt instead of a lockout comparison.
+func TestPushUnsignedBlobPrompts(t *testing.T) {
 	setup(t)
 	pub := mustInit(t)
 	rec, err := age.ParseX25519Recipient(pub)
@@ -209,9 +210,68 @@ func TestPushLegacyBlobSkipsLockoutCheck(t *testing.T) {
 	}
 	writeEnv(t, "NEW=1\n")
 
-	feed(t, "") // no prompts expected: self present, no manifest, set unchanged...
+	feed(t, "n\n") // decline the unverifiable-blob prompt
 	if err := Push(nil); err != nil {
-		t.Fatalf("push over a legacy blob should succeed without a lockout prompt: %v", err)
+		t.Fatalf("push should return nil (aborted), got %v", err)
+	}
+	after, err := os.ReadFile(backend.DefaultBlobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(legacy, after) {
+		t.Fatal("declined push must leave the unsigned blob untouched")
+	}
+
+	feed(t, "y\n") // approve it — push must then go through
+	if err := Push(nil); err != nil {
+		t.Fatalf("approved push over an unsigned blob should succeed: %v", err)
+	}
+	after, err = os.ReadFile(backend.DefaultBlobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(legacy, after) {
+		t.Fatal("approved push must replace the unsigned blob")
+	}
+}
+
+// TestPushForgedManifestNotTrusted: the recipient keys are public, so an
+// attacker who controls the backend can plant an unsigned but decryptable blob
+// whose manifest mirrors recipients.shenv exactly — which used to suppress
+// every prompt. The manifest must never be trusted without a valid signature.
+func TestPushForgedManifestNotTrusted(t *testing.T) {
+	setup(t)
+	pub := mustInit(t)
+	members, err := recipients.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := age.ParseX25519Recipient(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := crypto.EncryptBytes(
+		recipients.EmbedManifest([]byte("EVIL=1\n"), members),
+		[]age.Recipient{rec},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backend.DefaultBlobPath, forged, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeEnv(t, "X=1\n")
+
+	feed(t, "n\n") // the unverifiable-blob prompt must appear; decline it
+	if err := Push(nil); err != nil {
+		t.Fatalf("push should return nil (aborted), got %v", err)
+	}
+	after, err := os.ReadFile(backend.DefaultBlobPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(forged, after) {
+		t.Fatal("a forged manifest must not let push proceed without confirmation")
 	}
 }
 
