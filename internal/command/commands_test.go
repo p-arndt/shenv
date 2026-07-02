@@ -95,14 +95,30 @@ func TestInitMismatchedPassphrase(t *testing.T) {
 	}
 }
 
-func TestInitRefusesSecondRun(t *testing.T) {
+func TestInitReusesExistingKey(t *testing.T) {
 	setup(t)
-	feed(t, "\n\n") // two empty passphrases, one per Init attempt
+	feed(t, "\n") // one empty passphrase — only the first Init creates a key
 	if err := Init(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := Init(nil); err == nil {
-		t.Fatal("a second init must refuse to overwrite the existing key")
+	pub, err := identity.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second init (e.g. joining another repo) must reuse the key, not error or
+	// regenerate — that was the trap that let users lock themselves out.
+	if err := Init([]string{"me2"}); err != nil {
+		t.Fatalf("second init should reuse the existing key: %v", err)
+	}
+	if got, _ := identity.PublicKey(); got != pub {
+		t.Fatalf("second init changed the key: %q → %q", pub, got)
+	}
+	members, err := recipients.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected both registrations, got %+v", members)
 	}
 }
 

@@ -17,28 +17,23 @@ import (
 // defaultEnvFile is the local plaintext file — never committed.
 const defaultEnvFile = ".env"
 
-// Init generates the user's global keypair (if missing), registers them as the
-// first recipient of this repo, and sets up .gitignore so plaintext never leaks.
+// Init registers the user as a recipient of this repo and sets up .gitignore so
+// plaintext never leaks. The global keypair is created first if it doesn't exist
+// yet (same as `shenv keygen`); an existing one is reused — init is safe to run
+// in every repo you join.
 func Init(args []string) error {
 	name := "me"
 	if len(args) > 0 {
 		name = args[0]
 	}
 
-	passphrase, err := readNewPassphrase()
+	pub, err := identity.PublicKey()
 	if err != nil {
-		return err
-	}
-
-	id, err := identity.Create(passphrase)
-	if err != nil {
-		return err
-	}
-	pub := id.Recipient().String()
-	fmt.Printf("Created identity. Your public key:\n  %s\n\n", pub)
-	if passphrase != "" {
-		fmt.Println("Your private key is encrypted at rest with your passphrase.")
-		offerToRemember(pub, passphrase)
+		if pub, err = createIdentity(); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Using your existing identity. Your public key:\n  %s\n\n", pub)
 	}
 
 	if err := recipients.Add(name, pub); err != nil {
@@ -51,7 +46,44 @@ func Init(args []string) error {
 	}
 	fmt.Println("Updated .gitignore (.env stays local, env.age is shared).")
 	fmt.Println("\nNext: put your secrets in .env, then run `shenv push`.")
+	fmt.Printf("Remember to commit %s so your teammates' pushes keep you included.\n", recipients.Path)
 	return nil
+}
+
+// Keygen creates the global keypair without touching any repo — for users who
+// just want their key (e.g. to send their public key to a teammate) before they
+// are inside a project. `init` does this implicitly when needed.
+func Keygen(args []string) error {
+	if pub, err := identity.PublicKey(); err == nil {
+		path, _ := identity.Path()
+		fmt.Printf("You already have an identity at %s. Your public key:\n  %s\n", path, pub)
+		return nil
+	}
+	if _, err := createIdentity(); err != nil {
+		return err
+	}
+	fmt.Println("\nNext: run `shenv init [name]` inside a repo to register yourself there.")
+	return nil
+}
+
+// createIdentity prompts for a passphrase and generates the global keypair,
+// returning the new public key. Shared by init and keygen.
+func createIdentity() (string, error) {
+	passphrase, err := readNewPassphrase()
+	if err != nil {
+		return "", err
+	}
+	id, err := identity.Create(passphrase)
+	if err != nil {
+		return "", err
+	}
+	pub := id.Recipient().String()
+	fmt.Printf("Created identity. Your public key:\n  %s\n\n", pub)
+	if passphrase != "" {
+		fmt.Println("Your private key is encrypted at rest with your passphrase.")
+		offerToRemember(pub, passphrase)
+	}
+	return pub, nil
 }
 
 // Whoami prints the user's public key — the thing they share to get added elsewhere.
@@ -75,6 +107,22 @@ func AddMember(args []string) error {
 		return err
 	}
 	fmt.Printf("Added %q. Run `shenv push` to re-encrypt so they can pull.\n", name)
+	return nil
+}
+
+// RemoveMember takes a dev off the recipient list — the sanctioned way to revoke
+// access, as opposed to hand-editing the file (which push would flag as an
+// accidental drop).
+func RemoveMember(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: shenv remove-member <name>")
+	}
+	name := args[0]
+	if err := recipients.Remove(name); err != nil {
+		return err
+	}
+	fmt.Printf("Removed %q. Run `shenv push` to re-encrypt without them, and commit %s.\n", name, recipients.Path)
+	fmt.Println("Note: they could decrypt everything pushed so far — rotate any secrets they shouldn't keep.")
 	return nil
 }
 
@@ -109,13 +157,37 @@ func Push(args []string) error {
 		return err
 	}
 
-	// The recipients file is committed and arrives over an untrusted channel, so a
-	// silently-injected key would exfiltrate every secret on the next push. Show
-	// the current members and require confirmation if the set changed since last time.
 	selfKey, err := identity.PublicKey()
 	if err != nil {
 		selfKey = "" // no identity yet: every recipient counts as foreign
 	}
+
+	// Encrypting for a list that doesn't include yourself locks you out of your
+	// own secrets — almost always a setup mistake (e.g. `init` was run elsewhere).
+	if proceed := confirmSelfIncluded(members, selfKey); !proceed {
+		fmt.Println("Aborted — add yourself first, e.g. `shenv init`.")
+		return nil
+	}
+
+	store, err := loadBackend()
+	if err != nil {
+		return err
+	}
+
+	// The current blob carries the list it was encrypted for (see the manifest in
+	// the recipients package). Refuse to silently push a new blob that would lock
+	// out someone who can decrypt today — the drift that causes this (a recipients
+	// file that was never committed, a bad merge) is invisible in the file itself.
+	if proceed, err := confirmNoLockout(store, members); err != nil {
+		return err
+	} else if !proceed {
+		fmt.Println("Aborted — nobody was locked out.")
+		return nil
+	}
+
+	// The recipients file is committed and arrives over an untrusted channel, so a
+	// silently-injected key would exfiltrate every secret on the next push. Show
+	// the current members and require confirmation if the set changed since last time.
 	if proceed, err := confirmRecipients(members, selfKey); err != nil {
 		return err
 	} else if !proceed {
@@ -123,15 +195,11 @@ func Push(args []string) error {
 		return nil
 	}
 
-	blob, err := crypto.EncryptBytes(plaintext, keys)
+	blob, err := crypto.EncryptBytes(recipients.EmbedManifest(plaintext, members), keys)
 	if err != nil {
 		return err
 	}
 
-	store, err := loadBackend()
-	if err != nil {
-		return err
-	}
 	if err := store.Put(blob); err != nil {
 		return err
 	}

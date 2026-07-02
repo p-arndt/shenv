@@ -34,15 +34,19 @@ pull:  env.age  ──decrypt with your key──►  .env          (local only)
 First dev in a repo:
 
 ```sh
-shenv init bob # make your keypair (once ever) + set up this repo
+shenv init bob            # register in this repo (creates your keypair on first use)
 # ...put secrets in .env...
 shenv push                # .env → env.age, then commit env.age + .shenv/recipients
 ```
 
+> Run `shenv init` **inside the repo** — it registers you in *this* repo's
+> `.shenv/recipients`. If you only want a keypair (no repo yet), use `shenv keygen`.
+> Re-running `init` in another repo reuses your existing key.
+
 A new teammate:
 
 ```sh
-shenv init alice # once ever, on their machine
+shenv keygen              # once ever, on their machine
 shenv whoami              # prints their public key: age1...
 # they send you that key (it's public — Slack/mail is fine)
 ```
@@ -70,9 +74,11 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 
 | Command                         | What it does                                                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
-| `shenv init [name]`             | Create your keypair (if missing), register yourself in this repo, set up `.gitignore` |
+| `shenv keygen`                  | Create your keypair — no repo needed (`init` does this implicitly too)                |
+| `shenv init [name]`             | Register yourself in this repo, set up `.gitignore` (creates your keypair if missing) |
 | `shenv whoami`                  | Print your public key                                                                 |
 | `shenv add-member <name> <key>` | Add a teammate's public key (then `push`)                                             |
+| `shenv remove-member <name>`    | Revoke a teammate's access (then `push` — and rotate the secrets they knew)           |
 | `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.age` for all members                                |
 | `shenv pull [file] [--force]`   | Decrypt `env.age` → `.env`; asks before clobbering local edits                        |
 | `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
@@ -156,6 +162,13 @@ process memory. For that threat, use a hardware-backed key.
   it will encrypt for and, if the set changed since your last push on this machine,
   shows the added/removed keys and asks you to confirm — so an injected key can't
   silently grant an outsider access to your secrets.
+- **Lockout protection:** every blob carries the member list it was encrypted for,
+  embedded *inside* the ciphertext. Before overwriting, `push` compares that list
+  with `.shenv/recipients` and blocks if anyone would lose access — so a drifted or
+  never-committed recipients file can't silently lock a teammate (or yourself:
+  pushing a list without your own key warns too) out of `env.age`. Works with any
+  backend, since the truth travels with the blob. Deliberate removal goes through
+  `shenv remove-member` + confirming the prompt.
 - **Confidentiality, not sender authentication:** the age recipients used here hide
   contents from non-members, but they do not prove *who* wrote `env.age`. Any current
   member (or anyone who can edit the recipients list) can replace the blob; a puller

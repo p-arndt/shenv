@@ -84,6 +84,21 @@ func Add(name, key string) error {
 	return Save(append(members, Member{Name: name, Key: key}))
 }
 
+// Remove deletes a member by name and persists the list. Removing someone only
+// takes effect once `push` re-encrypts without them.
+func Remove(name string) error {
+	members, err := Load()
+	if err != nil {
+		return err
+	}
+	for i, m := range members {
+		if m.Name == name {
+			return Save(append(members[:i], members[i+1:]...))
+		}
+	}
+	return fmt.Errorf("no member named %q in %s", name, Path)
+}
+
 // validateName rejects names that would corrupt the line-oriented recipients
 // file: whitespace or control characters (a newline could smuggle in an entire
 // extra recipient line) and a leading '#' (would comment the entry out).

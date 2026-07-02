@@ -10,10 +10,12 @@ import (
 	"shenv/internal/crypto"
 	"shenv/internal/dotenv"
 	"shenv/internal/identity"
+	"shenv/internal/recipients"
 )
 
 // decryptEnv fetches the blob from the configured backend and decrypts it into
-// memory, unlocking the key via the keychain or a prompt as needed. Shared by
+// memory, unlocking the key via the keychain or a prompt as needed. The embedded
+// recipient manifest is stripped — callers get the bare .env content. Shared by
 // pull (writes it to disk) and run (injects it).
 func decryptEnv() ([]byte, error) {
 	store, err := loadBackend()
@@ -24,7 +26,17 @@ func decryptEnv() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	payload, err := decryptBlob(blob)
+	if err != nil {
+		return nil, err
+	}
+	_, plaintext := recipients.ExtractManifest(payload)
+	return plaintext, nil
+}
 
+// decryptBlob decrypts an already-fetched blob with the user's identity,
+// returning the raw payload (manifest included).
+func decryptBlob(blob []byte) ([]byte, error) {
 	pub, err := identity.PublicKey()
 	if err != nil {
 		return nil, err

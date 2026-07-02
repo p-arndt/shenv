@@ -66,6 +66,79 @@ func pushedRecipientsPath() (string, error) {
 	return filepath.Join(dir, hex.EncodeToString(sum[:])+".recipients"), nil
 }
 
+// confirmSelfIncluded warns when the user's own key is missing from the list they
+// are about to encrypt for — after that push they could no longer decrypt their
+// own secrets. This happens when `init` was run in a different directory (only
+// `add-member` was run here) or the recipients file was replaced. An empty
+// selfKey (no identity yet) is left to confirmRecipients' first-push prompt.
+func confirmSelfIncluded(members []recipients.Member, selfKey string) bool {
+	if selfKey == "" {
+		return true
+	}
+	for _, m := range members {
+		if m.Key == selfKey {
+			return true
+		}
+	}
+	fmt.Printf("WARNING: your own key is not in %s.\n", recipients.Path)
+	fmt.Println("After this push YOU will not be able to decrypt env.age yourself.")
+	fmt.Println("Add yourself first with `shenv init [name]`.")
+	fmt.Print("Push anyway? [y/N] ")
+	return confirm()
+}
+
+// confirmNoLockout compares the members embedded in the current blob (who can
+// decrypt today) against the set about to be encrypted for, and turns a silent
+// lockout into a blocking prompt. Unlike confirmRecipients this needs no local
+// state — the truth travels inside the blob — so it protects against drift that
+// happened on any machine. A blob that exists but can't be decrypted with this
+// identity gets its own warning: overwriting a blob you can't read likely locks
+// out everyone who can.
+func confirmNoLockout(store backend.Backend, cur []recipients.Member) (bool, error) {
+	prevBlob, err := store.Get()
+	if err != nil {
+		return true, nil // no existing blob — first push, nothing to guard
+	}
+
+	payload, err := decryptBlob(prevBlob)
+	if err != nil {
+		fmt.Println("An encrypted env.age already exists, but your key cannot decrypt it.")
+		fmt.Println("Overwriting it would likely LOCK OUT everyone who can read it today.")
+		fmt.Println("If you are new here, ask a member to run `shenv add-member` with your key instead.")
+		fmt.Print("Overwrite anyway? [y/N] ")
+		return confirm(), nil
+	}
+
+	prev, _ := recipients.ExtractManifest(payload)
+	if len(prev) == 0 {
+		return true, nil // blob from an older shenv without a manifest
+	}
+
+	curKeys := make(map[string]bool, len(cur))
+	for _, m := range cur {
+		curKeys[m.Key] = true
+	}
+	var dropped []recipients.Member
+	for _, m := range prev {
+		if !curKeys[m.Key] {
+			dropped = append(dropped, m)
+		}
+	}
+	if len(dropped) == 0 {
+		return true, nil
+	}
+
+	fmt.Println("These members can decrypt the current env.age but are MISSING from", recipients.Path+":")
+	for _, m := range dropped {
+		fmt.Printf("    - %s  %s\n", m.Name, m.Key)
+	}
+	fmt.Println("Pushing now will LOCK THEM OUT. If that is unintended, restore them with")
+	fmt.Println("`shenv add-member` (or `git checkout " + recipients.Path + "`) first.")
+	fmt.Println("To revoke access on purpose, use `shenv remove-member` and confirm here.")
+	fmt.Print("Lock them out? [y/N] ")
+	return confirm(), nil
+}
+
 // confirmRecipients lists the members the secrets are about to be encrypted for and,
 // if that set changed since this machine's last push, shows the additions/removals
 // and asks the user to confirm. This turns a silent recipient injection into a
