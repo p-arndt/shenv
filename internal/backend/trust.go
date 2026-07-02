@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// An exec backend runs shell commands out of .shenv/config, which arrives over the
+// An exec backend runs shell commands out of config.shenv, which arrives over the
 // same untrusted channel as the ciphertext (a clone, a merged PR). Running it
 // blindly is arbitrary code execution. We gate it behind trust-on-first-use: the
 // exact commands, bound to this repo's config path, must be approved once and are

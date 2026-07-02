@@ -7,7 +7,7 @@ import (
 
 // The manifest embeds the recipient list inside the encrypted payload itself, so
 // the next push — from any machine — can see who the current blob was encrypted
-// for and refuse to silently lock someone out. Unlike .shenv/recipients (which
+// for and refuse to silently lock someone out. Unlike recipients.shenv (which
 // can drift, be forgotten in a commit, or lose a merge), the manifest travels
 // with the blob through every backend and is encrypted+authenticated, so it
 // can't be tampered with in transit.

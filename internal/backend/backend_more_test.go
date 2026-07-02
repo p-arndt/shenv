@@ -9,7 +9,7 @@ import (
 )
 
 func TestStringMethods(t *testing.T) {
-	if got := (FileBackend{Path: "env.age"}).String(); got != "env.age" {
+	if got := (FileBackend{Path: "env.shenv"}).String(); got != "env.shenv" {
 		t.Errorf("FileBackend.String() = %q, want the path", got)
 	}
 	if got := (ExecBackend{}).String(); got != "exec backend" {
@@ -25,7 +25,7 @@ func TestFileBackendPutRejectsSymlink(t *testing.T) {
 	}
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target")
-	link := filepath.Join(dir, "env.age")
+	link := filepath.Join(dir, "env.shenv")
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}

@@ -75,9 +75,6 @@ func TestLoadSkipsCommentsAndBlanks(t *testing.T) {
 	inRepo(t)
 	key := testKey(t)
 	content := "# a comment\n\n   \nalice " + key + "\n"
-	if err := os.MkdirAll(".shenv", 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +89,6 @@ func TestLoadSkipsCommentsAndBlanks(t *testing.T) {
 
 func TestLoadRejectsMalformedLine(t *testing.T) {
 	inRepo(t)
-	if err := os.MkdirAll(".shenv", 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(Path, []byte("alice one two three\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-// Package backend abstracts where the encrypted env.age blob lives. The default
+// Package backend abstracts where the encrypted env.shenv blob lives. The default
 // is a file in the repo (shared via git); an exec backend delegates get/put to a
 // configured shell command, making any storage tool (aws, curl, rclone, …) usable
 // without shenv depending on it.
@@ -17,16 +17,16 @@ import (
 
 // DefaultBlobPath is where the FileBackend stores the blob, and the name shenv
 // keeps un-ignored in .gitignore so it can be committed.
-const DefaultBlobPath = "env.age"
+const DefaultBlobPath = "env.shenv"
 
 // maxBlobSize caps how many bytes a backend will read for an encrypted blob. A
-// hostile or runaway source (a huge env.age, an exec `get` that streams forever)
+// hostile or runaway source (a huge env.shenv, an exec `get` that streams forever)
 // would otherwise be buffered into memory unbounded. Real .env files are tiny;
 // 16 MiB is far more than any legitimate blob needs.
 const maxBlobSize = 16 << 20
 
 // configPath is the per-repo backend configuration (optional; absent => file).
-const configPath = ".shenv/config"
+const configPath = "config.shenv"
 
 // Backend reads and writes the encrypted blob. Implementations know nothing about
 // encryption — they move opaque bytes.
@@ -98,7 +98,7 @@ func (b ExecBackend) Put(data []byte) error {
 
 func (b ExecBackend) String() string { return "exec backend" }
 
-// Load reads .shenv/config and returns the configured backend. With no config
+// Load reads config.shenv and returns the configured backend. With no config
 // (or backend=file) it defaults to a file in the repo.
 func Load() (Backend, error) {
 	cfg, err := readConfig(configPath)

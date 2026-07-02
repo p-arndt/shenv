@@ -8,7 +8,7 @@ import (
 )
 
 func TestFileBackendRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "env.age")
+	path := filepath.Join(t.TempDir(), "env.shenv")
 	b := FileBackend{Path: path}
 
 	want := []byte("encrypted-blob")
@@ -112,7 +112,7 @@ func TestLoadRejectsEscapingBlobPath(t *testing.T) {
 	}
 	// A normal in-repo path (including subdirectories) must still work.
 	inRepo(t)
-	writeConfig(t, "backend = file\npath = blobs/env.age\n")
+	writeConfig(t, "backend = file\npath = blobs/env.shenv\n")
 	if _, err := Load(); err != nil {
 		t.Errorf("in-repo path should be accepted: %v", err)
 	}
@@ -139,9 +139,6 @@ func inRepo(t *testing.T) {
 
 func writeConfig(t *testing.T, content string) {
 	t.Helper()
-	if err := os.MkdirAll(".shenv", 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

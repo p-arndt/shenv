@@ -111,10 +111,7 @@ func TestLoadBackendDefaultsToFile(t *testing.T) {
 
 func TestLoadBackendExecNeedsApproval(t *testing.T) {
 	setup(t)
-	if err := os.MkdirAll(".shenv", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(".shenv/config", []byte("backend = exec\nget = fetch\nput = store\n"), 0o644); err != nil {
+	if err := os.WriteFile("config.shenv", []byte("backend = exec\nget = fetch\nput = store\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

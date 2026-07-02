@@ -5,7 +5,6 @@ package recipients
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -14,7 +13,7 @@ import (
 )
 
 // Path is the per-repo recipients file, relative to the repo root.
-const Path = ".shenv/recipients"
+const Path = "recipients.shenv"
 
 // Member is one entry: a friendly name and an age public key.
 type Member struct {
@@ -57,9 +56,6 @@ func Save(members []Member) error {
 		fmt.Fprintf(&b, "%s %s\n", m.Name, m.Key)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(Path), 0o755); err != nil {
-		return err
-	}
 	return os.WriteFile(Path, []byte(b.String()), 0o644)
 }
 

@@ -16,7 +16,7 @@ func tempHome(t *testing.T) {
 func TestEnsureTrustedFileBackendNeedsNoApproval(t *testing.T) {
 	tempHome(t)
 	called := false
-	err := EnsureTrusted(FileBackend{Path: "env.age"}, func(_, _ string) (bool, error) {
+	err := EnsureTrusted(FileBackend{Path: "env.shenv"}, func(_, _ string) (bool, error) {
 		called = true
 		return false, nil
 	})

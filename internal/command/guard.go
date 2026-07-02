@@ -29,7 +29,7 @@ func loadBackend() (backend.Backend, error) {
 
 // confirmExec shows the exec backend's commands and asks the user to approve them.
 func confirmExec(getCmd, putCmd string) (bool, error) {
-	fmt.Println("This repo's .shenv/config uses an EXEC backend, which runs shell commands:")
+	fmt.Println("This repo's config.shenv uses an EXEC backend, which runs shell commands:")
 	if getCmd != "" {
 		fmt.Printf("    get: %s\n", getCmd)
 	}
@@ -81,7 +81,7 @@ func confirmSelfIncluded(members []recipients.Member, selfKey string) bool {
 		}
 	}
 	fmt.Printf("WARNING: your own key is not in %s.\n", recipients.Path)
-	fmt.Println("After this push YOU will not be able to decrypt env.age yourself.")
+	fmt.Println("After this push YOU will not be able to decrypt env.shenv yourself.")
 	fmt.Println("Add yourself first with `shenv init [name]`.")
 	fmt.Print("Push anyway? [y/N] ")
 	return confirm()
@@ -102,7 +102,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member) (bool, err
 
 	payload, err := decryptBlob(prevBlob)
 	if err != nil {
-		fmt.Println("An encrypted env.age already exists, but your key cannot decrypt it.")
+		fmt.Println("An encrypted env.shenv already exists, but your key cannot decrypt it.")
 		fmt.Println("Overwriting it would likely LOCK OUT everyone who can read it today.")
 		fmt.Println("If you are new here, ask a member to run `shenv add-member` with your key instead.")
 		fmt.Print("Overwrite anyway? [y/N] ")
@@ -128,7 +128,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member) (bool, err
 		return true, nil
 	}
 
-	fmt.Println("These members can decrypt the current env.age but are MISSING from", recipients.Path+":")
+	fmt.Println("These members can decrypt the current env.shenv but are MISSING from", recipients.Path+":")
 	for _, m := range dropped {
 		fmt.Printf("    - %s  %s\n", m.Name, m.Key)
 	}

@@ -134,7 +134,7 @@ func TestPushDroppedMemberProceedsWhenConfirmed(t *testing.T) {
 }
 
 // TestPushForeignBlobWarns: a blob this identity cannot decrypt (e.g. a fresh
-// dev about to clobber the team's env.age) must trigger the overwrite warning.
+// dev about to clobber the team's env.shenv) must trigger the overwrite warning.
 func TestPushForeignBlobWarns(t *testing.T) {
 	setup(t)
 

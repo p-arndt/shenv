@@ -44,7 +44,7 @@ func Init(args []string) error {
 	if err := ensureGitignore(); err != nil {
 		return err
 	}
-	fmt.Println("Updated .gitignore (.env stays local, env.age is shared).")
+	fmt.Println("Updated .gitignore (.env stays local, env.shenv is shared).")
 	fmt.Println("\nNext: put your secrets in .env, then run `shenv push`.")
 	fmt.Printf("Remember to commit %s so your teammates' pushes keep you included.\n", recipients.Path)
 	return nil
@@ -126,7 +126,7 @@ func RemoveMember(args []string) error {
 	return nil
 }
 
-// Push encrypts .env for every recipient into env.age.
+// Push encrypts .env for every recipient into env.shenv.
 func Push(args []string) error {
 	in := defaultEnvFile
 	if len(args) > 0 {
@@ -210,7 +210,7 @@ func Push(args []string) error {
 	return nil
 }
 
-// Pull decrypts env.age back into .env, guarding against clobbering local edits.
+// Pull decrypts env.shenv back into .env, guarding against clobbering local edits.
 func Pull(args []string) error {
 	out := defaultEnvFile
 	force := false
@@ -261,7 +261,7 @@ func Pull(args []string) error {
 	return nil
 }
 
-// ensureGitignore makes sure .env is ignored and env.age is not.
+// ensureGitignore makes sure .env is ignored and env.shenv is not.
 func ensureGitignore() error {
 	const path = ".gitignore"
 	existing, _ := os.ReadFile(path)

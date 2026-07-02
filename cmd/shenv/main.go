@@ -18,15 +18,15 @@ Usage:
   shenv whoami                      Print your public key (share it to get added)
   shenv add-member <name> <key>     Grant a teammate access (then push)
   shenv remove-member <name>        Revoke a teammate's access (then push)
-  shenv push [file]                 Encrypt .env → env.age for all members
-  shenv pull [file] [--force]       Decrypt env.age → .env
+  shenv push [file]                 Encrypt .env → env.shenv for all members
+  shenv pull [file] [--force]       Decrypt env.shenv → .env
   shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase
   shenv version                     Print the shenv version
 
 Your private key lives in ~/.shenv/key.txt and is created once, for all repos.
-env.age is safe to commit; .env is not (and is gitignored automatically).`
+env.shenv is safe to commit; .env is not (and is gitignored automatically).`
 
 func main() {
 	if len(os.Args) < 2 {

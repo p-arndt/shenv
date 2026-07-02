@@ -65,7 +65,7 @@ func TestRunMissingSeparator(t *testing.T) {
 }
 
 // TestRunInjectsSecrets runs the test binary itself as the child command and
-// checks that a secret from env.age reached the child's environment.
+// checks that a secret from env.shenv reached the child's environment.
 func TestRunInjectsSecrets(t *testing.T) {
 	setup(t)
 	mustInit(t)

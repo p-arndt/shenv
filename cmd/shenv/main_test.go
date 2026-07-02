@@ -152,8 +152,8 @@ func TestEndToEnd(t *testing.T) {
 	if _, stderr, code := run("y\n", "push"); code != 0 {
 		t.Fatalf("push failed (%d): %s", code, stderr)
 	}
-	if _, err := os.Stat(filepath.Join(repo, "env.age")); err != nil {
-		t.Fatalf("push did not create env.age: %v", err)
+	if _, err := os.Stat(filepath.Join(repo, "env.shenv")); err != nil {
+		t.Fatalf("push did not create env.shenv: %v", err)
 	}
 
 	// Wipe and pull it back.
