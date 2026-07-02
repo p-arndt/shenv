@@ -34,11 +34,14 @@ func loadBackend() (backend.Backend, error) {
 // confirmExec shows the exec backend's commands and asks the user to approve them.
 func confirmExec(getCmd, putCmd string) (bool, error) {
 	fmt.Println("This repo's config.shenv uses an EXEC backend, which runs shell commands:")
+	// Sanitize even though readConfig already rejects control characters: this
+	// prompt is the sole gate before arbitrary code execution, so its display
+	// must not depend on every upstream path staying escape-free.
 	if getCmd != "" {
-		fmt.Printf("    get: %s\n", getCmd)
+		fmt.Printf("    get: %s\n", sanitizeTerm(getCmd))
 	}
 	if putCmd != "" {
-		fmt.Printf("    put: %s\n", putCmd)
+		fmt.Printf("    put: %s\n", sanitizeTerm(putCmd))
 	}
 	fmt.Println("These come from the repo and could have been added by anyone with commit access.")
 	fmt.Print("Run them? [y/N] ")
@@ -185,11 +188,13 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	sort.Strings(added)
 	sort.Strings(removed)
 	fmt.Println("\nThe recipient list CHANGED since your last push:")
+	// Sanitized for the same reason as confirmExec: this prompt is what exposes
+	// a planted recipient, so it must render exactly what the file contains.
 	for _, a := range added {
-		fmt.Printf("    + %s\n", strings.ReplaceAll(a, "\t", "  "))
+		fmt.Printf("    + %s\n", sanitizeTerm(strings.ReplaceAll(a, "\t", "  ")))
 	}
 	for _, r := range removed {
-		fmt.Printf("    - %s\n", strings.ReplaceAll(r, "\t", "  "))
+		fmt.Printf("    - %s\n", sanitizeTerm(strings.ReplaceAll(r, "\t", "  ")))
 	}
 	fmt.Print("Anyone added here will be able to decrypt these secrets. Continue? [y/N] ")
 	return confirm(), nil

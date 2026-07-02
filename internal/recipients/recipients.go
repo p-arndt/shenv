@@ -51,6 +51,16 @@ func Load() ([]Member, error) {
 		if err := validateName(fields[0]); err != nil {
 			return nil, fmt.Errorf("%s: %w", Path, err)
 		}
+		// Validate both key fields here, not just where they happen to be parsed
+		// later: push's recipient prompt echoes entries from this file, and a
+		// "key" carrying terminal escapes could redraw the very prompt meant to
+		// expose a planted recipient. Valid bech32/base64 is control-char-free.
+		if _, err := age.ParseX25519Recipient(fields[1]); err != nil {
+			return nil, fmt.Errorf("%s: member %q has an invalid public key: %w", Path, fields[0], err)
+		}
+		if _, err := crypto.ParseVerifyKey(fields[2]); err != nil {
+			return nil, fmt.Errorf("%s: member %q: %w", Path, fields[0], err)
+		}
 		// Signer lookup during pull is by name and takes the first match — a
 		// duplicate would let a shadow entry hijack an existing member's identity.
 		if seen[fields[0]] {

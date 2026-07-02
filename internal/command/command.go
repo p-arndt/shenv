@@ -5,7 +5,9 @@ package command
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -148,15 +150,15 @@ func Push(args []string) error {
 	if len(args) > 0 {
 		in = args[0]
 	}
-	fi, err := os.Lstat(in)
-	if err != nil {
+	if _, err := os.Lstat(in); err != nil {
 		return fmt.Errorf("no %s to push — create it first", in)
 	}
-	// A repo could ship .env as a committed symlink to a sensitive file (the
-	// private key, ~/.aws/credentials, …); pushing would then encrypt and share
-	// that file's contents with every recipient.
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink; refusing to read secrets through it", in)
+	// A repo could ship .env as a committed symlink — or a committed symlink
+	// directory holding it — pointing at a sensitive file (the private key,
+	// ~/.aws/credentials, …); pushing would then encrypt and share that file's
+	// contents with every recipient.
+	if err := backend.RejectSymlinks(in); err != nil {
+		return fmt.Errorf("%w (pushing would share the target file's contents with every recipient)", err)
 	}
 
 	plaintext, err := os.ReadFile(in)
@@ -273,10 +275,11 @@ func Pull(args []string) error {
 		return err
 	}
 
-	// Refuse to write the plaintext through a pre-planted symlink, which could
-	// redirect secrets to an attacker-chosen path.
-	if fi, err := os.Lstat(out); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%s is a symlink; refusing to write decrypted secrets through it", out)
+	// Refuse to write the plaintext through a pre-planted symlink — including a
+	// committed symlink directory on the way — which could redirect secrets to
+	// an attacker-chosen path.
+	if err := backend.RejectSymlinks(out); err != nil {
+		return fmt.Errorf("%w (writing decrypted secrets through it could put them anywhere)", err)
 	}
 
 	if !force {
@@ -322,6 +325,12 @@ func ensureIgnored(path string) error {
 	if !filepath.IsLocal(path) {
 		return nil
 	}
+	// .gitignore has no effect on a file git already tracks — `git commit -a`
+	// would still commit it. Without this check, `pull --out env.shenv` (or any
+	// committed path) would silently turn a tracked file into plaintext secrets.
+	if isGitTracked(path) {
+		return fmt.Errorf("%s is tracked by git, so .gitignore cannot keep it out of commits — pick a different --out (or `git rm --cached -- %s` first)", path, path)
+	}
 	added, err := appendGitignore(filepath.ToSlash(path))
 	if err != nil {
 		return fmt.Errorf("could not add %s to .gitignore (refusing to write plaintext that git could commit): %w", path, err)
@@ -330,6 +339,15 @@ func ensureIgnored(path string) error {
 		fmt.Printf("Added %s to .gitignore so the decrypted file can't be committed.\n", path)
 	}
 	return nil
+}
+
+// isGitTracked reports whether git tracks path. Best-effort: without git on
+// PATH or outside a work tree it reports false, leaving the .gitignore guard
+// to do what it can — the same protection level as before this check existed.
+func isGitTracked(path string) bool {
+	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", path)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	return cmd.Run() == nil
 }
 
 // appendGitignore appends the entries not already present (as exact lines) in

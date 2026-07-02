@@ -52,23 +52,24 @@ func (b FileBackend) Get() ([]byte, error) {
 }
 
 func (b FileBackend) Put(data []byte) error {
-	if err := rejectSymlinks(b.Path); err != nil {
+	if err := RejectSymlinks(b.Path); err != nil {
 		return err
 	}
 	return os.WriteFile(b.Path, data, 0o644)
 }
 
-// rejectSymlinks refuses to write through a symlink at the blob path or, for a
+// RejectSymlinks refuses to follow a symlink at the given path or, for a
 // repo-relative path, in any directory on the way to it. A committed symlink
-// would redirect the write to an attacker-chosen file (os.WriteFile follows
-// symlinks) — and a committed symlink *directory* (`dir` → ~/.ssh) with
-// `path=dir/x` in config.shenv would slip past a final-component check.
-// Ancestors above the repo root are not checked: the repo may legitimately
-// live under a symlinked path (e.g. /tmp on macOS).
-func rejectSymlinks(path string) error {
+// would redirect a write to — or a read from — an attacker-chosen file
+// (os.WriteFile/ReadFile follow symlinks), and a committed symlink *directory*
+// (`dir` → ~/.ssh) with a nested path like `dir/x` would slip past a
+// final-component check. Ancestors above the repo root are not checked: the
+// repo may legitimately live under a symlinked path (e.g. /tmp on macOS).
+// Used for the blob path, pull's output file, and push's input file alike.
+func RejectSymlinks(path string) error {
 	check := func(p string) error {
 		if fi, err := os.Lstat(p); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is a symlink; refusing to write through it", p)
+			return fmt.Errorf("%s is a symlink; refusing to follow it", p)
 		}
 		return nil
 	}

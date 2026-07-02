@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 )
 
 // readConfig parses a simple `key = value` config file. Blank lines and lines
@@ -26,6 +27,13 @@ func readConfig(path string) (map[string]string, error) {
 		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		// The config ships with the clone, and exec commands from it are shown in
+		// the trust prompt before running. An embedded terminal escape (ESC is not
+		// whitespace, so TrimSpace keeps it) could redraw that prompt to hide what
+		// is being approved. No key or single-line command needs control characters.
+		if i := strings.IndexFunc(line, func(r rune) bool { return r != '\t' && unicode.IsControl(r) }); i >= 0 {
+			return nil, fmt.Errorf("%s line %d: control character in %q", path, lineNo, raw)
 		}
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {

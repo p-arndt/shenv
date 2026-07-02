@@ -35,3 +35,23 @@ func TestLoadRejectsControlCharacterNames(t *testing.T) {
 		t.Fatal("a name containing control characters must be rejected on load")
 	}
 }
+
+// TestLoadRejectsInvalidKeys: the key columns must be validated on load, not
+// only where they happen to be parsed later. Push's recipient-change prompt
+// echoes these fields, so a "sign key" smuggling terminal escapes (invalid
+// base64 never contains them) could redraw the prompt that exposes tampering.
+func TestLoadRejectsInvalidKeys(t *testing.T) {
+	inRepo(t)
+	cases := map[string]string{
+		"bad public key": fmt.Sprintf("bob not-a-key %s\n", testSignKey(t)),
+		"bad sign key":   fmt.Sprintf("bob %s \x1b[2K\x1b[1Aspoof\n", testKey(t)),
+	}
+	for name, content := range cases {
+		if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("%s: Load must reject the file", name)
+		}
+	}
+}
