@@ -86,6 +86,24 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 | `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
 | `shenv remember`                | Cache your passphrase in the OS keychain so `pull` stops asking                       |
 | `shenv forget`                  | Remove the cached passphrase from the keychain                                        |
+| `shenv update [--check]`        | Update to the latest release (checksum-verified); `--check` only reports what's out   |
+
+## Updating
+
+```sh
+shenv update            # download the latest release, verify its SHA-256, swap in place
+shenv update --check    # just tell me if a newer version is out
+```
+
+`update` pulls the archive for your platform from GitHub Releases, checks it
+against the published `checksums.txt` before touching anything, and replaces the
+running binary in place. It refuses to run on a `dev`/source build (nothing to
+compare against) and on install locations you can't write to (it tells you to
+reinstall or elevate).
+
+shenv also shows a one-line _"a newer version is available"_ hint on stderr at
+most once a day. It never installs anything on its own — set
+`SHENV_NO_UPDATE_CHECK=1` to turn the hint off.
 
 ## Build
 
@@ -105,6 +123,7 @@ internal/
   keystore/         # optional OS-keychain passphrase cache
   dotenv/           # minimal .env parser (for `run`)
   backend/          # where the encrypted blob lives (file | exec)
+  update/           # self-update from GitHub Releases + "new version" notice
   command/          # subcommands wiring the above together
 ```
 
