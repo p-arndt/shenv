@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -230,7 +231,13 @@ func TestEditPreservesDivergentLocalEnv(t *testing.T) {
 // instance takes the file and returns immediately — it must be refused however
 // it is spelled, with the reason in the error.
 func TestEditorRejectsNotepad(t *testing.T) {
-	for _, val := range []string{"notepad", "NOTEPAD.EXE", `C:\Windows\System32\notepad.exe`} {
+	spellings := []string{"notepad", "NOTEPAD.EXE"}
+	if runtime.GOOS == "windows" {
+		// filepath.Base only splits on backslashes on Windows — elsewhere this
+		// spelling isn't a resolvable path at all, so there's nothing to vet.
+		spellings = append(spellings, `C:\Windows\System32\notepad.exe`)
+	}
+	for _, val := range spellings {
 		t.Run(val, func(t *testing.T) {
 			t.Setenv("VISUAL", "")
 			t.Setenv("EDITOR", val)
