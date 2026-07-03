@@ -76,13 +76,62 @@ func TestVerifyRejectsVersionReplay(t *testing.T) {
 // A build whose embedded verify key is the unset placeholder (or garbage) must
 // fail closed — never "no key, skip verification".
 func TestVerifyFailsClosedWithoutKey(t *testing.T) {
-	orig := releaseVerifyKey
-	t.Cleanup(func() { releaseVerifyKey = orig })
+	orig := releaseVerifyKeys
+	t.Cleanup(func() { releaseVerifyKeys = orig })
 	for _, key := range []string{"RELEASE-KEY-NOT-SET", "", "not!!base64", base64.RawStdEncoding.EncodeToString([]byte("short"))} {
-		releaseVerifyKey = key
+		releaseVerifyKeys = []string{key}
 		if err := VerifyChecksumsSignature("n", []byte("c"), []byte("sig")); err == nil {
 			t.Errorf("verify key %q must fail closed", key)
 		}
+	}
+	// A list with no usable key at all (empty, or only garbage entries) must
+	// also fail closed rather than "no key, so skip verification".
+	for _, keys := range [][]string{{}, {"", "not!!base64"}} {
+		releaseVerifyKeys = keys
+		if err := VerifyChecksumsSignature("n", []byte("c"), []byte("sig")); err == nil {
+			t.Errorf("verify keys %q must fail closed", keys)
+		}
+	}
+}
+
+// Key rotation: while both the retiring key and its successor are embedded, a
+// release signed by EITHER must verify. That overlap window is exactly what
+// lets a new key roll out before the old one is dropped without stranding
+// binaries that trust only one of the two. A signature from an untrusted third
+// key must still be rejected.
+func TestVerifyAcceptsAnyTrustedKey(t *testing.T) {
+	oldPub, oldPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPub, newPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := releaseVerifyKeys
+	t.Cleanup(func() { releaseVerifyKeys = orig })
+	releaseVerifyKeys = []string{
+		base64.RawStdEncoding.EncodeToString(oldPub),
+		base64.RawStdEncoding.EncodeToString(newPub),
+	}
+
+	name := "shenv_1.0.0_checksums.txt"
+	content := []byte("abc123  shenv_1.0.0_linux_amd64.tar.gz\n")
+
+	for label, priv := range map[string]ed25519.PrivateKey{"retiring key": oldPriv, "successor key": newPriv} {
+		sig := SignChecksums(priv, name, content)
+		if err := VerifyChecksumsSignature(name, content, []byte(sig)); err != nil {
+			t.Errorf("signature from the %s should verify during the rotation overlap: %v", label, err)
+		}
+	}
+
+	_, strangerPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := SignChecksums(strangerPriv, name, content)
+	if err := VerifyChecksumsSignature(name, content, []byte(forged)); err == nil {
+		t.Error("a signature from an untrusted key must be rejected even while two keys are trusted")
 	}
 }
 

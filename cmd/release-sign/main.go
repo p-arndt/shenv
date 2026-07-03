@@ -84,12 +84,14 @@ func gen(keyfile string) error {
 	if err := os.WriteFile(keyfile, []byte(seed+"\n"), 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("public key (embed as releaseVerifyKey in internal/update/sign.go):\n  %s\n\n", base64.RawStdEncoding.EncodeToString(pub))
+	fmt.Printf("public key (add to releaseVerifyKeys in internal/update/sign.go):\n  %s\n\n", base64.RawStdEncoding.EncodeToString(pub))
 	fmt.Printf("private key written to %s — NOT printed.\n", keyfile)
 	fmt.Println("Next:")
 	fmt.Println("  1. gh secret set RELEASE_SIGNING_KEY < " + keyfile)
 	fmt.Println("  2. back the file up somewhere offline (password manager), then delete it here")
 	fmt.Println("  3. never commit it — losing it means shipped updaters can't verify future releases")
+	fmt.Println("  Rotating an existing key? Keep the old entry in releaseVerifyKeys")
+	fmt.Println("  until users have upgraded — see docs/release-signing.md.")
 	return nil
 }
 

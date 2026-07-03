@@ -109,6 +109,10 @@ shenv also shows a one-line _"a newer version is available"_ hint on stderr at
 most once a day. It never installs anything on its own — set
 `SHENV_NO_UPDATE_CHECK=1` to turn the hint off.
 
+Maintainers: how the release key is generated, held, and rotated (without
+stranding already-shipped updaters) is documented in
+[docs/release-signing.md](docs/release-signing.md).
+
 ## Build
 
 ```sh
