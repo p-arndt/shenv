@@ -43,7 +43,7 @@ func (b FileBackend) Get() ([]byte, error) {
 	f, err := os.Open(b.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s not found — has anyone run `shenv push` yet?", b.Path)
+			return nil, fmt.Errorf("%s not found — has anyone run `shenv seal` yet?", b.Path)
 		}
 		return nil, err
 	}

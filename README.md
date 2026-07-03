@@ -23,12 +23,12 @@ sees your secrets.
 - Each repo has `recipients.shenv`: teammates' **public keys** (one for encryption, one for
   verifying signatures). Public, so it's committed.
 - `env.shenv` is the encrypted `.env`, encrypted _for all recipients at once_ and **signed by
-  whoever pushed it**. Committed / shared.
+  whoever sealed it**. Committed / shared.
 - `.env` is plaintext. Stays local, auto-gitignored.
 
 ```
-push:  .env  ──sign with your key, encrypt for every recipient──►  env.shenv   (shared)
-pull:  env.shenv  ──decrypt, verify who signed it──►  .env                      (local only)
+seal:  .env  ──sign with your key, encrypt for every recipient──►  env.shenv   (shared)
+open:  env.shenv  ──decrypt, verify who signed it──►  .env                      (local only)
 ```
 
 ## Quick start
@@ -38,7 +38,7 @@ First dev in a repo:
 ```sh
 shenv init bob            # register in this repo (creates your keypair on first use)
 # ...put secrets in .env...
-shenv push                # .env → env.shenv, then commit env.shenv + recipients.shenv
+shenv seal                # .env → env.shenv, then commit env.shenv + recipients.shenv
 ```
 
 > Run `shenv init` **inside the repo** — it registers you in *this* repo's
@@ -57,13 +57,13 @@ You grant them access:
 
 ```sh
 shenv add-member alice age1... <signing-key>
-shenv push                # re-encrypt so alice is included; commit env.shenv
+shenv seal                # re-encrypt so alice is included; commit env.shenv
 ```
 
 Now alice can:
 
 ```sh
-shenv pull                # env.shenv → .env
+shenv open                # env.shenv → .env
 ```
 
 Or skip the file entirely and inject secrets straight into a process:
@@ -79,14 +79,17 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 | `shenv keygen`                  | Create your keypair — no repo needed (`init` does this implicitly too)                |
 | `shenv init [name]`             | Register yourself in this repo, set up `.gitignore` (creates your keypair if missing) |
 | `shenv whoami`                  | Print your public key and signing key                                                 |
-| `shenv add-member <name> <key> <signing-key>` | Add a teammate's public keys (then `push`)                              |
-| `shenv remove-member <name>`    | Revoke a teammate's access (then `push` — and rotate the secrets they knew)           |
-| `shenv push [file]`             | Encrypt `.env` (or `file`) → `env.shenv` for all members, signed with your key          |
-| `shenv pull [file] [--force]`   | Decrypt `env.shenv` → `.env`, verifying who pushed it; asks before clobbering local edits |
+| `shenv add-member <name> <key> <signing-key>` | Add a teammate's public keys (then `seal`)                              |
+| `shenv remove-member <name>`    | Revoke a teammate's access (then `seal` — and rotate the secrets they knew)           |
+| `shenv seal [file]`             | Encrypt `.env` (or `file`) → `env.shenv` for all members, signed with your key          |
+| `shenv open [file] [--force]`   | Decrypt `env.shenv` → `.env`, verifying who sealed it; asks before clobbering local edits |
 | `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
-| `shenv remember`                | Cache your passphrase in the OS keychain so `pull` stops asking                       |
+| `shenv remember`                | Cache your passphrase in the OS keychain so `open` stops asking                       |
 | `shenv forget`                  | Remove the cached passphrase from the keychain                                        |
 | `shenv update [--check]`        | Update to the latest release (checksum-verified); `--check` only reports what's out   |
+
+> `push` and `pull` still work as **deprecated aliases** for `seal` and `open`. They
+> print a deprecation warning and will be removed in a future release.
 
 ## Updating
 
@@ -166,12 +169,12 @@ The private key in `~/.shenv/key.txt` decrypts every secret you have access to, 
   owner-only ACL is applied (the Unix bits are ignored there), so no other local
   user can read it.
 - **Passphrase (optional).** `shenv init` offers to encrypt the key at rest with a
-  passphrase (age/scrypt). If set, `pull` prompts for it; `whoami` still works
+  passphrase (age/scrypt). If set, `open` prompts for it; `whoami` still works
   without it, since the public key is kept as a plaintext comment.
 - **OS keychain (optional, for comfort).** `shenv remember` caches the passphrase
   in the OS keychain (Windows Credential Manager, Linux Secret Service, macOS
-  Keychain), bound to your login, so `pull` stops asking. `shenv forget` removes it.
-  On systems without a keychain (headless Linux, containers) `pull` simply falls
+  Keychain), bound to your login, so `open` stops asking. `shenv forget` removes it.
+  On systems without a keychain (headless Linux, containers) `open` simply falls
   back to prompting — it never hard-fails.
 
 These layers compose: a synced/copied `key.txt` is useless without the passphrase,
@@ -181,33 +184,33 @@ process memory. For that threat, use a hardware-backed key.
 
 ## Notes & roadmap
 
-- **Onboarding re-push:** adding a member requires one existing member to `push` again
+- **Onboarding re-seal:** adding a member requires one existing member to `seal` again
   (their key wasn't in the previous blob). Inherent to E2E; it's a one-liner.
-- **Recipients are committed, so `push` guards them:** the `recipients.shenv` list
-  travels over the same untrusted channel as the ciphertext. `push` lists exactly who
-  it will encrypt for and, if the set changed since your last push on this machine,
+- **Recipients are committed, so `seal` guards them:** the `recipients.shenv` list
+  travels over the same untrusted channel as the ciphertext. `seal` lists exactly who
+  it will encrypt for and, if the set changed since your last seal on this machine,
   shows the added/removed keys and asks you to confirm — so an injected key can't
   silently grant an outsider access to your secrets.
 - **Lockout protection:** every blob carries the member list it was encrypted for,
-  embedded *inside* the ciphertext. Before overwriting, `push` compares that list
+  embedded *inside* the ciphertext. Before overwriting, `seal` compares that list
   with `recipients.shenv` and blocks if anyone would lose access — so a drifted or
   never-committed recipients file can't silently lock a teammate out of `env.shenv`.
-  Locking *yourself* out is impossible: push refuses outright when your own key isn't
+  Locking *yourself* out is impossible: seal refuses outright when your own key isn't
   in the list (it couldn't sign a verifiable blob anyway). Works with any backend,
   since the truth travels with the blob. Deliberate removal goes through
   `shenv remove-member` + confirming the prompt.
 - **Sender authentication — every blob is signed:** the recipient keys in
   `recipients.shenv` are public, so without more, *anyone* could encrypt a replacement
   `env.shenv` "for the team" (a hijacked S3 bucket or gist would be enough). That's why
-  `push` signs the payload (Ed25519, sign-then-encrypt — the signature lives *inside*
-  the ciphertext, covering the member manifest and the secrets), and `pull`/`run`
+  `seal` signs the payload (Ed25519, sign-then-encrypt — the signature lives *inside*
+  the ciphertext, covering the member manifest and the secrets), and `open`/`run`
   verify it against the signer's key in `recipients.shenv` before trusting a single
   value. A blob that isn't signed by a *current member* is rejected outright, and every
-  pull tells you who pushed it ("signed by bob"). The signing key is derived from your
+  open tells you who sealed it ("signed by bob"). The signing key is derived from your
   age key, so there is still only one secret to protect and back up.
 - **What signing does not cover:** `recipients.shenv` is the trust anchor, so someone
   with *commit access to the repo* could swap both a key and the blob — that edit is
-  visible in git history and guarded by push's recipient-change prompt, but pull does
+  visible in git history and guarded by seal's recipient-change prompt, but open does
   not independently detect it. Replays aren't prevented either: an old, validly-signed
   blob can be restored by anyone with write access (enable storage versioning to spot
   this). And shenv still assumes a small, mutually trusted team — signing authenticates

@@ -112,7 +112,7 @@ func TestCommandErrorExits1(t *testing.T) {
 }
 
 // TestEndToEnd exercises the real binary through the full lifecycle: init (empty
-// passphrase via stdin), whoami, push, and pull.
+// passphrase via stdin), whoami, seal, and open.
 func TestEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	repo := t.TempDir()
@@ -149,19 +149,19 @@ func TestEndToEnd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("SECRET=42\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, code := run("y\n", "push"); code != 0 {
-		t.Fatalf("push failed (%d): %s", code, stderr)
+	if _, stderr, code := run("y\n", "seal"); code != 0 {
+		t.Fatalf("seal failed (%d): %s", code, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "env.shenv")); err != nil {
-		t.Fatalf("push did not create env.shenv: %v", err)
+		t.Fatalf("seal did not create env.shenv: %v", err)
 	}
 
-	// Wipe and pull it back.
+	// Wipe and open it back.
 	if err := os.Remove(filepath.Join(repo, ".env")); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, code := run("y\n", "pull"); code != 0 {
-		t.Fatalf("pull failed (%d): %s", code, stderr)
+	if _, stderr, code := run("y\n", "open"); code != 0 {
+		t.Fatalf("open failed (%d): %s", code, stderr)
 	}
 	got, err := os.ReadFile(filepath.Join(repo, ".env"))
 	if err != nil {
@@ -169,5 +169,20 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if string(got) != "SECRET=42\n" {
 		t.Fatalf("round trip mismatch: got %q", got)
+	}
+
+	// The deprecated push/pull aliases must still work and warn on stderr.
+	if _, stderr, code := run("y\n", "push"); code != 0 {
+		t.Fatalf("push alias failed (%d): %s", code, stderr)
+	} else if !strings.Contains(stderr, "deprecated") {
+		t.Fatalf("push alias should warn about deprecation, got:\n%s", stderr)
+	}
+	if err := os.Remove(filepath.Join(repo, ".env")); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := run("y\n", "pull"); code != 0 {
+		t.Fatalf("pull alias failed (%d): %s", code, stderr)
+	} else if !strings.Contains(stderr, "deprecated") {
+		t.Fatalf("pull alias should warn about deprecation, got:\n%s", stderr)
 	}
 }

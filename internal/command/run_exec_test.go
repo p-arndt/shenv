@@ -37,7 +37,7 @@ func TestDecryptEnvRoundTrip(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "K=v\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := decryptEnv()
@@ -71,7 +71,7 @@ func TestRunInjectsSecrets(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "INJECTED=secret-value\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 
