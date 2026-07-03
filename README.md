@@ -187,41 +187,32 @@ and the cached passphrase is bound to your OS login. Note: no software measure
 protects against malware running _as you_ — once the key is unlocked it lives in
 process memory. For that threat, use a hardware-backed key.
 
-## Notes & roadmap
+## Security
 
-- **Onboarding re-seal:** adding a member requires one existing member to `seal` again
-  (their key wasn't in the previous blob). Inherent to E2E; it's a one-liner.
-- **Recipients are committed, so `seal` guards them:** the `recipients.shenv` list
-  travels over the same untrusted channel as the ciphertext. `seal` lists exactly who
-  it will encrypt for and, if the set changed since your last seal on this machine,
-  shows the added/removed keys and asks you to confirm — so an injected key can't
-  silently grant an outsider access to your secrets.
-- **Lockout protection:** every blob carries the member list it was encrypted for,
-  embedded *inside* the ciphertext. Before overwriting, `seal` compares that list
-  with `recipients.shenv` and blocks if anyone would lose access — so a drifted or
-  never-committed recipients file can't silently lock a teammate out of `env.shenv`.
-  Locking *yourself* out is impossible: seal refuses outright when your own key isn't
-  in the list (it couldn't sign a verifiable blob anyway). Works with any backend,
-  since the truth travels with the blob. Deliberate removal goes through
-  `shenv remove-member` + confirming the prompt.
-- **Sender authentication — every blob is signed:** the recipient keys in
-  `recipients.shenv` are public, so without more, *anyone* could encrypt a replacement
-  `env.shenv` "for the team" (a hijacked S3 bucket or gist would be enough). That's why
-  `seal` signs the payload (Ed25519, sign-then-encrypt — the signature lives *inside*
-  the ciphertext, covering the member manifest and the secrets), and `open`/`run`
-  verify it against the signer's key in `recipients.shenv` before trusting a single
-  value. A blob that isn't signed by a *current member* is rejected outright, and every
-  open tells you who sealed it ("signed by bob"). The signing key is derived from your
-  age key, so there is still only one secret to protect and back up.
-- **What signing does not cover:** `recipients.shenv` is the trust anchor, so someone
-  with *commit access to the repo* could swap both a key and the blob — that edit is
-  visible in git history and guarded by seal's recipient-change prompt, but open does
-  not independently detect it. Replays aren't prevented either: an old, validly-signed
-  blob can be restored by anyone with write access (enable storage versioning to spot
-  this). And shenv still assumes a small, mutually trusted team — signing authenticates
-  members to each other; it is not a defense against a malicious member.
-- `shenv run` keeps secrets out of any file, but environment variables are still
-  readable by other processes running *as you* (`/proc/<pid>/environ`, `ps e`).
-  It reduces the leak surface versus a file; it is not a hard boundary.
-- Planned: `github:user` public-key lookup for onboarding, CI support via
-  `SHENV_IDENTITY` / `SHENV_PASSPHRASE` environment variables.
+shenv assumes a small, mutually trusted team. A few highlights:
+
+- **Every blob is signed.** `seal` signs the payload (Ed25519, sign-then-encrypt);
+  `open`/`run` reject anything not signed by a current member and tell you who sealed
+  it — so a hijacked bucket or gist can't plant a replacement `env.shenv`.
+- **No accidental lockouts.** Each blob embeds the member list it was encrypted for;
+  `seal` refuses to ship one that would drop a current member — or yourself — from access.
+- **Recipient changes are surfaced.** `recipients.shenv` rides the same untrusted
+  channel as the ciphertext, so `seal` shows added/removed keys and asks you to confirm
+  before encrypting for a changed set.
+- **Your private key is protected in layers** — file permissions, an optional
+  passphrase, and an optional OS-keychain cache. See
+  [Protecting your private key](#protecting-your-private-key).
+
+Full threat model — what signing does and doesn't cover, replays, and `run`'s
+process-environment exposure — is in [docs/security.md](docs/security.md).
+
+> The security design was reviewed by Claude (Fable 5) 🤖 — a sanity check, not a
+> substitute for a professional audit. Found a hole? Please report it **privately**
+> via [GitHub's security advisories](https://github.com/p-arndt/shenv/security/advisories/new),
+> not a public issue. Regular bugs and feature requests are welcome as
+> [issues](https://github.com/p-arndt/shenv/issues).
+
+## Roadmap
+
+- `github:user` public-key lookup for onboarding
+- CI support via `SHENV_IDENTITY` / `SHENV_PASSPHRASE` environment variables
