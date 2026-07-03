@@ -9,3 +9,7 @@
 
 # The release signing key must never land in the repo, wherever it was generated
 release-signing-key*
+
+# shenv
+.env
+!env.shenv

@@ -4,13 +4,14 @@ package identity
 
 import "golang.org/x/sys/windows"
 
-// secureKeyFile locks down the key file so only the current user can read it.
+// SecureFile locks down a secret-holding file (the key file, edit's transient
+// plaintext) so only the current user can read it.
 //
 // On Windows the Unix permission bits passed to os.WriteFile are ignored, so a
 // plain 0600 does NOT keep other local users out. We instead set an explicit
 // DACL granting full control to the current user's SID only, and mark it
 // PROTECTED so inherited ACEs from the parent directory are stripped.
-func secureKeyFile(path string) error {
+func SecureFile(path string) error {
 	token := windows.GetCurrentProcessToken()
 	tokenUser, err := token.GetTokenUser()
 	if err != nil {

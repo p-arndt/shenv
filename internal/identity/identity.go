@@ -198,7 +198,7 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 	}
 	// O_EXCL makes create-if-absent atomic: no stat/write race, and it refuses to
 	// follow a pre-planted symlink at the key path. 0o600 covers Unix; Windows
-	// ignores it, so secureKeyFile enforces the ACL below.
+	// ignores it, so SecureFile enforces the ACL below.
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
@@ -209,7 +209,7 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 	// Lock the still-empty file down before the secret touches disk: on Windows
 	// a fresh file starts with the directory's inherited ACL, so writing first
 	// would briefly expose the key bytes to whoever that ACL admits.
-	if err := secureKeyFile(path); err != nil {
+	if err := SecureFile(path); err != nil {
 		f.Close()
 		os.Remove(path)
 		return nil, fmt.Errorf("securing key file: %w", err)

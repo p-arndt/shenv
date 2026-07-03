@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode"
 
+	"filippo.io/age"
+
 	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/identity"
@@ -250,15 +252,6 @@ func Seal(args []string) error {
 		return err
 	}
 
-	members, err := recipients.Load()
-	if err != nil {
-		return err
-	}
-	keys, err := recipients.Keys(members)
-	if err != nil {
-		return err
-	}
-
 	// Seal signs the payload, and the signature is only verifiable if the sealer
 	// is a member — so both an identity and a registration here are required.
 	// This also closes the classic trap of encrypting for a list without your own
@@ -267,26 +260,49 @@ func Seal(args []string) error {
 	if err != nil {
 		return fmt.Errorf("seal signs env.shenv with your key, but you have no identity yet — run `shenv init [name]` first")
 	}
+
+	_, err = sealEnv(plaintext, in, selfKey,
+		func() (*age.X25519Identity, error) { return identity.Load(unlocker(selfKey)) },
+		loadBackend)
+	return err
+}
+
+// sealEnv is the shared sealing path behind Seal and Edit: it runs every guard
+// (membership, signing-key match, lockout, recipient confirmation), encrypts
+// the plaintext for all members signed as the caller, and stores the blob.
+// The identity and backend arrive as lazy loaders so Seal keeps its exact
+// prompt order (passphrase before exec-backend trust) while Edit can pass the
+// ones it already holds without prompting again. sealed is false when the user
+// declined one of the confirmation prompts — printed, but not an error.
+func sealEnv(plaintext []byte, source, selfKey string, loadID func() (*age.X25519Identity, error), loadStore func() (backend.Backend, error)) (sealed bool, err error) {
+	members, err := recipients.Load()
+	if err != nil {
+		return false, err
+	}
+	keys, err := recipients.Keys(members)
+	if err != nil {
+		return false, err
+	}
 	self := memberByKey(members, selfKey)
 	if self == nil {
-		return fmt.Errorf("your key is not in %s — after this seal you could not decrypt env.shenv, and nobody could verify your signature; register yourself first with `shenv init [name]`", recipients.Path)
+		return false, fmt.Errorf("your key is not in %s — after this seal you could not decrypt env.shenv, and nobody could verify your signature; register yourself first with `shenv init [name]`", recipients.Path)
 	}
 
-	id, err := identity.Load(unlocker(selfKey))
+	id, err := loadID()
 	if err != nil {
-		return err
+		return false, err
 	}
 	signKey, err := crypto.DeriveSigningKey(id)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if verify := crypto.VerifyKeyString(signKey); self.SignKey != verify {
-		return fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then seal again", recipients.Path, self.Name)
+		return false, fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then seal again", recipients.Path, self.Name)
 	}
 
-	store, err := loadBackend()
+	store, err := loadStore()
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// The current blob carries the list it was encrypted for (see the manifest in
@@ -294,35 +310,35 @@ func Seal(args []string) error {
 	// out someone who can decrypt today — the drift that causes this (a recipients
 	// file that was never committed, a bad merge) is invisible in the file itself.
 	if proceed, err := confirmNoLockout(store, members, id); err != nil {
-		return err
+		return false, err
 	} else if !proceed {
 		fmt.Println("Aborted — nobody was locked out.")
-		return nil
+		return false, nil
 	}
 
 	// The recipients file is committed and arrives over an untrusted channel, so a
 	// silently-injected key would exfiltrate every secret on the next seal. Show
 	// the current members and require confirmation if the set changed since last time.
 	if proceed, err := confirmRecipients(members, selfKey); err != nil {
-		return err
+		return false, err
 	} else if !proceed {
 		fmt.Println("Aborted — recipients not confirmed.")
-		return nil
+		return false, nil
 	}
 
 	blob, err := crypto.EncryptBytes(recipients.SealPayload(plaintext, members, self.Name, signKey), keys)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := store.Put(blob); err != nil {
-		return err
+		return false, err
 	}
 	if err := rememberRecipients(members); err != nil {
-		return err
+		return false, err
 	}
-	fmt.Printf("Encrypted %s → %s for %d member(s), signed as %q.\n", in, store, len(members), self.Name)
-	return nil
+	fmt.Printf("Encrypted %s → %s for %d member(s), signed as %q.\n", source, store, len(members), self.Name)
+	return true, nil
 }
 
 // memberByKey finds the member entry with the given age public key.

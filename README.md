@@ -72,6 +72,12 @@ Or skip the file entirely and inject secrets straight into a process:
 shenv run -- npm start    # secrets live only in npm's environment, no .env written
 ```
 
+Changing a secret doesn't need a plaintext `.env` either:
+
+```sh
+shenv edit                # decrypt → your $EDITOR → re-seal; plaintext never touches the repo
+```
+
 ## Commands
 
 | Command                         | What it does                                                                          |
@@ -84,6 +90,7 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 | `shenv remove-member <name>`    | Revoke a teammate's access (then `seal` — and rotate the secrets they knew)           |
 | `shenv seal [file]`             | Encrypt `.env` (or `file`) → `env.shenv` for all members, signed with your key          |
 | `shenv open [file] [--force]`   | Decrypt `env.shenv` → `.env`, verifying who sealed it; asks before clobbering local edits |
+| `shenv edit`                    | Edit the secrets in `$EDITOR` and re-seal — the plaintext lives only in a locked-down temp file outside the repo, shredded afterwards |
 | `shenv run -- <command>`        | Run a command with secrets injected as env vars — no plaintext `.env` on disk         |
 | `shenv remember`                | Cache your passphrase in the OS keychain so `open` stops asking                       |
 | `shenv forget`                  | Remove the cached passphrase from the keychain                                        |

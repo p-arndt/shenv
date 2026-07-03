@@ -23,6 +23,7 @@ Usage:
   shenv remove-member <name>        Revoke a teammate's access (then seal)
   shenv seal [file]                 Encrypt .env → env.shenv for all members, signed with your key
   shenv open [file] [--force]       Decrypt env.shenv → .env (verifies who sealed it)
+  shenv edit                        Edit secrets in your $EDITOR — decrypt, edit, re-seal; no plaintext in the repo
   shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase
@@ -70,6 +71,8 @@ func main() {
 		err = command.Seal(args)
 	case "open":
 		err = command.Open(args)
+	case "edit":
+		err = command.Edit(args)
 	case "push":
 		deprecatedAlias("push", "seal")
 		err = command.Seal(args)

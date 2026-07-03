@@ -4,8 +4,9 @@ package identity
 
 import "os"
 
-// secureKeyFile enforces owner-only permissions. On Unix the 0600 mode bits are
-// honoured directly, so this just re-asserts them in case the umask interfered.
-func secureKeyFile(path string) error {
+// SecureFile enforces owner-only permissions on a secret-holding file (the key
+// file, edit's transient plaintext). On Unix the 0600 mode bits are honoured
+// directly, so this just re-asserts them in case the umask interfered.
+func SecureFile(path string) error {
 	return os.Chmod(path, 0o600)
 }
