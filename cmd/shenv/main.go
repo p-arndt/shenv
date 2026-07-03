@@ -15,7 +15,7 @@ const usage = `shenv — share encrypted .env files across a team
 
 Usage:
   shenv keygen                      Create your keypair (no repo needed)
-  shenv init [name]                 Register yourself in this repo (creates your keypair if missing)
+  shenv init [name]                 Register yourself in this repo (name defaults to your git/OS user; creates your keypair if missing)
   shenv whoami                      Print your public keys (share them to get added)
   shenv add-member <name> <key> <signing-key>
                                     Grant a teammate access (then seal)

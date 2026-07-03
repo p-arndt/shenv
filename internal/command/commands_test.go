@@ -38,6 +38,10 @@ func TestInitPlaintext(t *testing.T) {
 	setup(t)
 	feed(t, "\n") // empty passphrase → plaintext key
 
+	// Pin the default-name sources so the assertion below doesn't depend on the
+	// git config or OS user of whoever runs the tests.
+	stubNameSources(t, "me")
+
 	if err := Init(nil); err != nil {
 		t.Fatalf("init: %v", err)
 	}

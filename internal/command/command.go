@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"shenv/internal/backend"
 	"shenv/internal/crypto"
@@ -23,9 +25,10 @@ const defaultEnvFile = ".env"
 // Init registers the user as a recipient of this repo and sets up .gitignore so
 // plaintext never leaks. The global keypair is created first if it doesn't exist
 // yet (same as `shenv keygen`); an existing one is reused — init is safe to run
-// in every repo you join.
+// in every repo you join. When no name is given it defaults to the git-configured
+// user name, then the OS login name, and finally "me" (see defaultName).
 func Init(args []string) error {
-	name := "me"
+	name := defaultName()
 	if len(args) > 0 {
 		name = args[0]
 	}
@@ -55,6 +58,87 @@ func Init(args []string) error {
 	fmt.Println("\nNext: put your secrets in .env, then run `shenv seal`.")
 	fmt.Printf("Remember to commit %s so your teammates keep you included when they seal.\n", recipients.Path)
 	return nil
+}
+
+// defaultNameSources are the ordered providers consulted for the default init
+// name. Declared as a var so tests can substitute deterministic candidates.
+var defaultNameSources = []func() string{gitUserName, osUserName}
+
+// defaultName picks the recipient name for `shenv init` when the user gives none.
+// It prefers the git-configured user name, then the OS login name, and finally
+// falls back to "me". Each candidate is sanitized so it satisfies the recipients
+// file's name rules (no whitespace or control characters, no leading '#').
+func defaultName() string {
+	for _, src := range defaultNameSources {
+		if name := sanitizeName(src()); name != "" {
+			return name
+		}
+	}
+	return "me"
+}
+
+// gitUserName returns `git config user.name`, or "" if git is missing, we're
+// outside a repo, or no name is configured. Best-effort, like isGitTracked.
+func gitUserName() string {
+	cmd := exec.Command("git", "config", "user.name")
+	cmd.Stderr = io.Discard
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
+}
+
+// osUserName returns the current OS login name, or "" if it can't be determined.
+// On Windows user.Username is "DOMAIN\\user"; keep only the login part.
+func osUserName() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	name := u.Username
+	if i := strings.LastIndexAny(name, `\/`); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
+}
+
+// maxDerivedNameLen caps names derived from git/OS config (not explicit CLI
+// args) so a bloated or hostile config can't balloon the recipients file.
+const maxDerivedNameLen = 64
+
+// sanitizeName coerces a candidate into a name the recipients file accepts:
+// whitespace runs collapse to a single '-', any leading '#' is stripped, and
+// everything that isn't a graphic character is dropped. Requiring IsGraphic —
+// not just rejecting IsControl — matters because the candidate can come from a
+// cloned repo's .git/config (user.name): Unicode format characters (category
+// Cf) such as bidi overrides and zero-width characters are not IsControl, yet
+// would let a hostile config plant a name that renders deceptively in prompts
+// and in the committed recipients file (e.g. a zero-width char forging a
+// visual duplicate of an existing member). Returns "" if nothing usable
+// remains.
+func sanitizeName(s string) string {
+	runes := make([]rune, 0, len(s))
+	pendingSpace := false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			pendingSpace = len(runes) > 0 // ignore leading/trailing whitespace
+		case !unicode.IsGraphic(r):
+			// drop — controls would corrupt the line-oriented file or smuggle
+			// terminal escapes; format chars (Cf) enable visual spoofing
+		default:
+			if pendingSpace {
+				runes = append(runes, '-')
+				pendingSpace = false
+			}
+			runes = append(runes, r)
+		}
+	}
+	if len(runes) > maxDerivedNameLen {
+		runes = runes[:maxDerivedNameLen]
+	}
+	return strings.Trim(string(runes), "#-")
 }
 
 // Keygen creates the global keypair without touching any repo — for users who

@@ -77,7 +77,7 @@ shenv run -- npm start    # secrets live only in npm's environment, no .env writ
 | Command                         | What it does                                                                          |
 | ------------------------------- | ------------------------------------------------------------------------------------- |
 | `shenv keygen`                  | Create your keypair — no repo needed (`init` does this implicitly too)                |
-| `shenv init [name]`             | Register yourself in this repo, set up `.gitignore` (creates your keypair if missing) |
+| `shenv init [name]`             | Register yourself in this repo, set up `.gitignore` (name defaults to your git/OS username; creates your keypair if missing) |
 | `shenv whoami`                  | Print your public key and signing key                                                 |
 | `shenv add-member <name> <key> <signing-key>` | Add a teammate's public keys (then `seal`)                              |
 | `shenv remove-member <name>`    | Revoke a teammate's access (then `seal` — and rotate the secrets they knew)           |
