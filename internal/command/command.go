@@ -52,8 +52,8 @@ func Init(args []string) error {
 		return err
 	}
 	fmt.Println("Updated .gitignore (.env stays local, env.shenv is shared).")
-	fmt.Println("\nNext: put your secrets in .env, then run `shenv push`.")
-	fmt.Printf("Remember to commit %s so your teammates' pushes keep you included.\n", recipients.Path)
+	fmt.Println("\nNext: put your secrets in .env, then run `shenv seal`.")
+	fmt.Printf("Remember to commit %s so your teammates keep you included when they seal.\n", recipients.Path)
 	return nil
 }
 
@@ -115,7 +115,7 @@ func Whoami(args []string) error {
 }
 
 // AddMember records another dev's public keys so they can decrypt — and their
-// pushes can be verified — after the next push.
+// seals can be verified — after the next seal.
 func AddMember(args []string) error {
 	if len(args) != 3 {
 		return fmt.Errorf("usage: shenv add-member <name> <age1-public-key> <signing-key>\n(the new member gets both keys from `shenv whoami`)")
@@ -124,12 +124,12 @@ func AddMember(args []string) error {
 	if err := recipients.Add(name, key, signKey); err != nil {
 		return err
 	}
-	fmt.Printf("Added %q. Run `shenv push` to re-encrypt so they can pull.\n", name)
+	fmt.Printf("Added %q. Run `shenv seal` to re-encrypt so they can open.\n", name)
 	return nil
 }
 
 // RemoveMember takes a dev off the recipient list — the sanctioned way to revoke
-// access, as opposed to hand-editing the file (which push would flag as an
+// access, as opposed to hand-editing the file (which seal would flag as an
 // accidental drop).
 func RemoveMember(args []string) error {
 	if len(args) != 1 {
@@ -139,26 +139,26 @@ func RemoveMember(args []string) error {
 	if err := recipients.Remove(name); err != nil {
 		return err
 	}
-	fmt.Printf("Removed %q. Run `shenv push` to re-encrypt without them, and commit %s.\n", name, recipients.Path)
-	fmt.Println("Note: they could decrypt everything pushed so far — rotate any secrets they shouldn't keep.")
+	fmt.Printf("Removed %q. Run `shenv seal` to re-encrypt without them, and commit %s.\n", name, recipients.Path)
+	fmt.Println("Note: they could decrypt everything sealed so far — rotate any secrets they shouldn't keep.")
 	return nil
 }
 
-// Push encrypts .env for every recipient into env.shenv.
-func Push(args []string) error {
+// Seal encrypts .env for every recipient into env.shenv.
+func Seal(args []string) error {
 	in := defaultEnvFile
 	if len(args) > 0 {
 		in = args[0]
 	}
 	if _, err := os.Lstat(in); err != nil {
-		return fmt.Errorf("no %s to push — create it first", in)
+		return fmt.Errorf("no %s to seal — create it first", in)
 	}
 	// A repo could ship .env as a committed symlink — or a committed symlink
 	// directory holding it — pointing at a sensitive file (the private key,
-	// ~/.aws/credentials, …); pushing would then encrypt and share that file's
+	// ~/.aws/credentials, …); sealing would then encrypt and share that file's
 	// contents with every recipient.
 	if err := backend.RejectSymlinks(in); err != nil {
-		return fmt.Errorf("%w (pushing would share the target file's contents with every recipient)", err)
+		return fmt.Errorf("%w (sealing would share the target file's contents with every recipient)", err)
 	}
 
 	plaintext, err := os.ReadFile(in)
@@ -175,17 +175,17 @@ func Push(args []string) error {
 		return err
 	}
 
-	// Push signs the payload, and the signature is only verifiable if the pusher
+	// Seal signs the payload, and the signature is only verifiable if the sealer
 	// is a member — so both an identity and a registration here are required.
 	// This also closes the classic trap of encrypting for a list without your own
 	// key and locking yourself out (e.g. `init` was run in another directory).
 	selfKey, err := identity.PublicKey()
 	if err != nil {
-		return fmt.Errorf("push signs env.shenv with your key, but you have no identity yet — run `shenv init [name]` first")
+		return fmt.Errorf("seal signs env.shenv with your key, but you have no identity yet — run `shenv init [name]` first")
 	}
 	self := memberByKey(members, selfKey)
 	if self == nil {
-		return fmt.Errorf("your key is not in %s — after this push you could not decrypt env.shenv, and nobody could verify your signature; register yourself first with `shenv init [name]`", recipients.Path)
+		return fmt.Errorf("your key is not in %s — after this seal you could not decrypt env.shenv, and nobody could verify your signature; register yourself first with `shenv init [name]`", recipients.Path)
 	}
 
 	id, err := identity.Load(unlocker(selfKey))
@@ -197,7 +197,7 @@ func Push(args []string) error {
 		return err
 	}
 	if verify := crypto.VerifyKeyString(signKey); self.SignKey != verify {
-		return fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then push again", recipients.Path, self.Name)
+		return fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then seal again", recipients.Path, self.Name)
 	}
 
 	store, err := loadBackend()
@@ -206,7 +206,7 @@ func Push(args []string) error {
 	}
 
 	// The current blob carries the list it was encrypted for (see the manifest in
-	// the recipients package). Refuse to silently push a new blob that would lock
+	// the recipients package). Refuse to silently seal a new blob that would lock
 	// out someone who can decrypt today — the drift that causes this (a recipients
 	// file that was never committed, a bad merge) is invisible in the file itself.
 	if proceed, err := confirmNoLockout(store, members, id); err != nil {
@@ -217,7 +217,7 @@ func Push(args []string) error {
 	}
 
 	// The recipients file is committed and arrives over an untrusted channel, so a
-	// silently-injected key would exfiltrate every secret on the next push. Show
+	// silently-injected key would exfiltrate every secret on the next seal. Show
 	// the current members and require confirmation if the set changed since last time.
 	if proceed, err := confirmRecipients(members, selfKey); err != nil {
 		return err
@@ -251,8 +251,8 @@ func memberByKey(members []recipients.Member, key string) *recipients.Member {
 	return nil
 }
 
-// Pull decrypts env.shenv back into .env, guarding against clobbering local edits.
-func Pull(args []string) error {
+// Open decrypts env.shenv back into .env, guarding against clobbering local edits.
+func Open(args []string) error {
 	out := defaultEnvFile
 	force := false
 	for i := 0; i < len(args); i++ {
@@ -266,7 +266,7 @@ func Pull(args []string) error {
 		case strings.HasPrefix(a, "--out="):
 			out = strings.TrimPrefix(a, "--out=")
 		default:
-			out = a // positional target, e.g. `shenv pull .env.local`
+			out = a // positional target, e.g. `shenv open .env.local`
 		}
 	}
 
@@ -293,7 +293,7 @@ func Pull(args []string) error {
 	}
 
 	// The tool's core promise is that plaintext never lands in the repo — that
-	// must hold for `pull --out .env.production` just as for the default .env.
+	// must hold for `open --out .env.production` just as for the default .env.
 	if err := ensureIgnored(out); err != nil {
 		return err
 	}
@@ -316,7 +316,7 @@ func ensureGitignore() error {
 	return err
 }
 
-// ensureIgnored guards a pull target: decrypted plaintext must never be
+// ensureIgnored guards an open target: decrypted plaintext must never be
 // committable, so any repo-local output path is added to .gitignore before the
 // secrets are written. Paths outside the repo (absolute, `..`-escaping) can't
 // be committed from here and are left alone. Failing to update .gitignore is
@@ -326,7 +326,7 @@ func ensureIgnored(path string) error {
 		return nil
 	}
 	// .gitignore has no effect on a file git already tracks — `git commit -a`
-	// would still commit it. Without this check, `pull --out env.shenv` (or any
+	// would still commit it. Without this check, `open --out env.shenv` (or any
 	// committed path) would silently turn a tracked file into plaintext secrets.
 	if isGitTracked(path) {
 		return fmt.Errorf("%s is tracked by git, so .gitignore cannot keep it out of commits — pick a different --out (or `git rm --cached -- %s` first)", path, path)

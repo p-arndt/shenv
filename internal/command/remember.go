@@ -19,9 +19,9 @@ func unlocker(pub string) identity.PassphraseFunc {
 }
 
 // offerToRemember asks, at init time, whether to cache the passphrase so future
-// pulls don't prompt. A keychain failure is non-fatal — the key still works.
+// opens don't prompt. A keychain failure is non-fatal — the key still works.
 func offerToRemember(pub, passphrase string) {
-	fmt.Print("Remember this passphrase in your OS keychain so pull won't ask? [y/N] ")
+	fmt.Print("Remember this passphrase in your OS keychain so open won't ask? [y/N] ")
 	if !confirm() {
 		return
 	}
@@ -57,7 +57,7 @@ func Remember(args []string) error {
 	if err := keystore.Set(pub, pass); err != nil {
 		return fmt.Errorf("could not access the OS keychain: %w", err)
 	}
-	fmt.Println("Passphrase saved. `shenv pull` won't ask on this machine anymore.")
+	fmt.Println("Passphrase saved. `shenv open` won't ask on this machine anymore.")
 	return nil
 }
 

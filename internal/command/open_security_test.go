@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-// mustPush seeds the default blob so a pull has something to decrypt.
-func mustPush(t *testing.T, secrets string) {
+// mustSeal seeds the default blob so an open has something to decrypt.
+func mustSeal(t *testing.T, secrets string) {
 	t.Helper()
 	writeEnv(t, secrets)
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
-		t.Fatalf("push: %v", err)
+	if err := Seal(nil); err != nil {
+		t.Fatalf("seal: %v", err)
 	}
 }
 
@@ -26,7 +26,7 @@ func TestPullRefusesGitTrackedTarget(t *testing.T) {
 	}
 	setup(t)
 	mustInit(t)
-	mustPush(t, "X=1\n")
+	mustSeal(t, "X=1\n")
 
 	if err := os.WriteFile("notes.txt", []byte("tracked content"), 0o644); err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestPullRefusesGitTrackedTarget(t *testing.T) {
 	}
 
 	feed(t, "y\n") // the file exists and differs, so the overwrite prompt fires first
-	err := Pull([]string{"--out", "notes.txt"})
+	err := Open([]string{"--out", "notes.txt"})
 	if err == nil || !strings.Contains(err.Error(), "tracked") {
 		t.Fatalf("pull over a tracked file must be refused, got %v", err)
 	}
@@ -53,14 +53,14 @@ func TestPullRefusesGitTrackedTarget(t *testing.T) {
 func TestPullRefusesSymlinkDirTarget(t *testing.T) {
 	setup(t)
 	mustInit(t)
-	mustPush(t, "X=1\n")
+	mustSeal(t, "X=1\n")
 
 	outside := t.TempDir()
 	if err := os.Symlink(outside, "linked"); err != nil {
 		t.Skipf("cannot create symlinks here: %v", err)
 	}
 
-	err := Pull([]string{"--out", "linked/.env"})
+	err := Open([]string{"--out", "linked/.env"})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("pull through a symlinked directory must be refused, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestPushRefusesSymlinkDirSource(t *testing.T) {
 		t.Skipf("cannot create symlinks here: %v", err)
 	}
 
-	err := Push([]string{"linked/victim"})
+	err := Seal([]string{"linked/victim"})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("push through a symlinked directory must be refused, got %v", err)
 	}
