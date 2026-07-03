@@ -18,10 +18,10 @@ Usage:
   shenv init [name]                 Register yourself in this repo (creates your keypair if missing)
   shenv whoami                      Print your public keys (share them to get added)
   shenv add-member <name> <key> <signing-key>
-                                    Grant a teammate access (then push)
-  shenv remove-member <name>        Revoke a teammate's access (then push)
-  shenv push [file]                 Encrypt .env → env.shenv for all members, signed with your key
-  shenv pull [file] [--force]       Decrypt env.shenv → .env (verifies who pushed it)
+                                    Grant a teammate access (then seal)
+  shenv remove-member <name>        Revoke a teammate's access (then seal)
+  shenv seal [file]                 Encrypt .env → env.shenv for all members, signed with your key
+  shenv open [file] [--force]       Decrypt env.shenv → .env (verifies who sealed it)
   shenv run -- <command> [args...]  Run a command with secrets injected (no .env on disk)
   shenv remember                    Cache your passphrase in the OS keychain
   shenv forget                      Remove the cached passphrase
@@ -29,7 +29,15 @@ Usage:
   shenv version                     Print the shenv version
 
 Your private key lives in ~/.shenv/key.txt and is created once, for all repos.
-env.shenv is safe to commit; .env is not (and is gitignored automatically).`
+env.shenv is safe to commit; .env is not (and is gitignored automatically).
+
+(push and pull are deprecated aliases for seal and open.)`
+
+// deprecatedAlias warns (to stderr, so piped stdout stays clean) that an old
+// command name still works but should be replaced by its new name.
+func deprecatedAlias(old, replacement string) {
+	fmt.Fprintf(os.Stderr, "warning: `shenv %s` is deprecated and will be removed in a future release; use `shenv %s` instead.\n", old, replacement)
+}
 
 func main() {
 	// Clean up any leftover binary from a previous self-update (Windows can't
@@ -55,10 +63,16 @@ func main() {
 		err = command.AddMember(args)
 	case "remove-member":
 		err = command.RemoveMember(args)
+	case "seal":
+		err = command.Seal(args)
+	case "open":
+		err = command.Open(args)
 	case "push":
-		err = command.Push(args)
+		deprecatedAlias("push", "seal")
+		err = command.Seal(args)
 	case "pull":
-		err = command.Pull(args)
+		deprecatedAlias("pull", "open")
+		err = command.Open(args)
 	case "run":
 		err = command.Run(args)
 	case "remember":

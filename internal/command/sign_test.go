@@ -44,7 +44,7 @@ func TestPullRejectsUnsignedBlob(t *testing.T) {
 	plantBlob(t, recipients.EmbedManifest([]byte("X=1\n"), members), pub)
 
 	feed(t, "")
-	if err := Pull(nil); err == nil {
+	if err := Open(nil); err == nil {
 		t.Fatal("pulling an unsigned blob must fail")
 	}
 	if _, err := os.Stat(defaultEnvFile); err == nil {
@@ -69,7 +69,7 @@ func TestPullRejectsForgedSignature(t *testing.T) {
 	plantBlob(t, forged, pub)
 
 	feed(t, "")
-	if err := Pull(nil); err == nil {
+	if err := Open(nil); err == nil {
 		t.Fatal("a blob signed with a non-member key must be rejected")
 	}
 	if _, err := os.Stat(defaultEnvFile); err == nil {
@@ -91,7 +91,7 @@ func TestPullRejectsUnknownSigner(t *testing.T) {
 	plantBlob(t, recipients.SealPayload([]byte("X=1\n"), members, "stranger", strangerKey), pub)
 
 	feed(t, "")
-	if err := Pull(nil); err == nil {
+	if err := Open(nil); err == nil {
 		t.Fatal("a signer missing from recipients.shenv must be rejected")
 	}
 }
@@ -130,7 +130,7 @@ func TestPullAcceptsTeammatesPush(t *testing.T) {
 	}
 
 	feed(t, "")
-	if err := Pull(nil); err != nil {
+	if err := Open(nil); err != nil {
 		t.Fatalf("a teammate's signed push must verify: %v", err)
 	}
 	got, err := os.ReadFile(defaultEnvFile)
