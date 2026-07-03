@@ -75,3 +75,25 @@ func TestLoadRejectsInvalidKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadRejectsFormatCharacterNames: Unicode format characters (category Cf,
+// e.g. zero-width space and bidi overrides) are invisible yet are not control
+// characters, so IsControl alone would let them through. A cloned recipients
+// file could plant "bob<ZWSP>" as a visual duplicate of "bob" — and the
+// duplicate-name guard compares exact strings, so the forgery would slip past
+// it. Load must reject any non-graphic rune.
+func TestLoadRejectsFormatCharacterNames(t *testing.T) {
+	inRepo(t)
+	for label, evil := range map[string]string{
+		"zero-width space":       "bob\u200B",
+		"right-to-left override": "ev\u202Eil",
+	} {
+		content := fmt.Sprintf("%s %s %s\n", evil, testKey(t), testSignKey(t))
+		if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("%s: a name with format characters must be rejected on load", label)
+		}
+	}
+}

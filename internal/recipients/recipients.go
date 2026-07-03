@@ -163,8 +163,16 @@ func Remove(name string) error {
 }
 
 // validateName rejects names that would corrupt the line-oriented recipients
-// file: whitespace or control characters (a newline could smuggle in an entire
-// extra recipient line) and a leading '#' (would comment the entry out).
+// file or deceive whoever reads it: whitespace (a newline could smuggle in an
+// entire extra recipient line), a leading '#' (would comment the entry out),
+// and any non-graphic rune. The non-graphic test rejects both control
+// characters (category Cc — ANSI escapes that could rewrite the prompts that
+// display the name) and format characters (category Cf — zero-width and bidi
+// runes that render invisibly). This file arrives over an untrusted channel (a
+// clone, a merge), so a Cf-spoofed name could forge a visual duplicate of an
+// existing member — and duplicate-name detection is by exact string, so the
+// forgery would slip past it and let a shadow entry hijack that member's
+// signature attribution.
 func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("member name must not be empty")
@@ -173,8 +181,10 @@ func validateName(name string) error {
 		return fmt.Errorf("member name %q must not start with '#'", name)
 	}
 	for _, r := range name {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
-			return fmt.Errorf("member name %q must not contain whitespace or control characters", name)
+		// IsSpace is checked separately because a plain space (U+0020) is a
+		// graphic rune, yet still splits the line into the wrong number of fields.
+		if unicode.IsSpace(r) || !unicode.IsGraphic(r) {
+			return fmt.Errorf("member name %q must not contain whitespace, control, or invisible characters", name)
 		}
 	}
 	return nil
