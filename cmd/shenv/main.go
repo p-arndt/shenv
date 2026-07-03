@@ -17,6 +17,7 @@ Usage:
   shenv keygen                      Create your keypair (no repo needed)
   shenv init [name]                 Register yourself in this repo (name defaults to your git/OS user; creates your keypair if missing)
   shenv whoami                      Print your public keys (share them to get added)
+  shenv status                      Show this repo's state: identity, team, backend, sync
   shenv add-member <name> <key> <signing-key>
                                     Grant a teammate access (then seal)
   shenv remove-member <name>        Revoke a teammate's access (then seal)
@@ -59,6 +60,8 @@ func main() {
 		err = command.Init(args)
 	case "whoami":
 		err = command.Whoami(args)
+	case "status":
+		err = command.Status(args)
 	case "add-member":
 		err = command.AddMember(args)
 	case "remove-member":
