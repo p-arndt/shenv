@@ -49,6 +49,14 @@ const (
 // Release binaries are a few MB. A var only so tests can shrink it.
 var maxAsset = int64(64 << 20) // 64 MiB
 
+// The auxiliary verification assets are a few hundred bytes in a genuine
+// release, so they get far tighter caps than the archive: there is no reason to
+// buffer megabytes of "checksums" a hostile release asset serves up.
+const (
+	maxChecksums = int64(1 << 20) // 1 MiB
+	maxSig       = int64(4 << 10) // 4 KiB
+)
+
 // Client talks to the GitHub Releases API. The zero value is not usable; use
 // NewClient. APIBase and HTTP are overridable in tests.
 type Client struct {
@@ -79,25 +87,44 @@ func NewClient(hc *http.Client) *Client {
 	return &Client{HTTP: hc, APIBase: "https://api.github.com", Owner: repoOwner, Repo: repoName}
 }
 
-// allowedURL rejects any download URL that isn't https. The release metadata —
-// including asset URLs — is input, not truth: following a plain-http URL (or a
-// redirect hop onto one) would let an on-path attacker substitute both the
-// archive and the checksums file that vouches for it, making verification
-// meaningless. Plain http is tolerated only for loopback, so tests can run a
-// local server. The error deliberately doesn't echo the URL: it's untrusted
-// bytes that would otherwise land on the user's terminal.
+// allowedURL rejects any download URL that isn't https to a GitHub-controlled
+// host. The release metadata — including asset URLs — is input, not truth:
+// following a plain-http URL (or a redirect hop onto one) would let an on-path
+// attacker substitute both the archive and the checksums file that vouches for
+// it, making verification meaningless. Pinning the host matters too, even
+// though the signature check would still catch a swapped payload: a tampered
+// release must not be able to point every updating client at an arbitrary
+// server — that would leak who runs shenv to an attacker-chosen host and turn
+// clients into traffic generators. Plain http is tolerated only for loopback,
+// so tests can run a local server. The error deliberately doesn't echo the
+// URL: it's untrusted bytes that would otherwise land on the user's terminal.
 func allowedURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("release asset URL is unparsable")
 	}
 	switch {
-	case u.Scheme == "https":
+	case u.Scheme == "https" && isGitHubHost(u.Hostname()):
 		return nil
+	case u.Scheme == "https":
+		return fmt.Errorf("refusing to download a release asset from a non-GitHub host")
 	case u.Scheme == "http" && isLoopback(u.Hostname()):
 		return nil
 	}
 	return fmt.Errorf("refusing to download a release asset over a non-https URL")
+}
+
+// isGitHubHost reports whether host is one GitHub serves releases from: the API,
+// the release download path on github.com, and the *.githubusercontent.com CDN
+// hosts those downloads redirect to. Matching is on whole labels — a lookalike
+// like "evilgithubusercontent.com" or "github.com.evil.example" must not pass.
+func isGitHubHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	switch host {
+	case "github.com", "api.github.com":
+		return true
+	}
+	return strings.HasSuffix(host, ".githubusercontent.com")
 }
 
 // isLoopback reports whether host is localhost or a loopback IP.
@@ -178,11 +205,12 @@ func (c *Client) LatestRelease(ctx context.Context) (*Release, error) {
 	return &rel, nil
 }
 
-// download fetches an asset into memory. It refuses non-https URLs (the asset
-// URL comes from untrusted release metadata) and errors — rather than silently
-// truncating — when the body exceeds maxAsset. what names the asset in errors,
-// since the URL itself is untrusted bytes we won't echo to the terminal.
-func (c *Client) download(ctx context.Context, url, what string) ([]byte, error) {
+// download fetches an asset into memory. It refuses URLs that fail allowedURL
+// (the asset URL comes from untrusted release metadata) and errors — rather
+// than silently truncating — when the body exceeds limit. what names the asset
+// in errors, since the URL itself is untrusted bytes we won't echo to the
+// terminal.
+func (c *Client) download(ctx context.Context, url, what string, limit int64) ([]byte, error) {
 	if err := allowedURL(url); err != nil {
 		return nil, fmt.Errorf("%s: %w", what, err)
 	}
@@ -199,12 +227,12 @@ func (c *Client) download(ctx context.Context, url, what string) ([]byte, error)
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading %s: HTTP %d", what, resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAsset+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxAsset {
-		return nil, fmt.Errorf("%s exceeds the %d MiB limit", what, maxAsset>>20)
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%s exceeds its %d-byte size limit", what, limit)
 	}
 	return data, nil
 }
@@ -471,15 +499,15 @@ func (c *Client) SelfUpdate(ctx context.Context, current string, checkOnly bool)
 		return nil, fmt.Errorf("release is not signed: %w — refusing to update", err)
 	}
 
-	archive, err := c.download(ctx, archiveAsset.URL, "release archive")
+	archive, err := c.download(ctx, archiveAsset.URL, "release archive", maxAsset)
 	if err != nil {
 		return nil, err
 	}
-	sums, err := c.download(ctx, sumsAsset.URL, "checksums file")
+	sums, err := c.download(ctx, sumsAsset.URL, "checksums file", maxChecksums)
 	if err != nil {
 		return nil, err
 	}
-	sig, err := c.download(ctx, sigAsset.URL, "checksums signature")
+	sig, err := c.download(ctx, sigAsset.URL, "checksums signature", maxSig)
 	if err != nil {
 		return nil, err
 	}
