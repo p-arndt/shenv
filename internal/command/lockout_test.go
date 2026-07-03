@@ -32,7 +32,7 @@ func TestPushSelfMissingFails(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "") // must not prompt — this is a hard error, not a confirmation
-	if err := Push(nil); err == nil {
+	if err := Seal(nil); err == nil {
 		t.Fatal("push without being a recipient must fail")
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err == nil {
@@ -49,7 +49,7 @@ func TestPushNoIdentityFails(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "")
-	if err := Push(nil); err == nil {
+	if err := Seal(nil); err == nil {
 		t.Fatal("push without an identity must fail")
 	}
 }
@@ -66,7 +66,7 @@ func TestPushSigningKeyMismatchFails(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "")
-	if err := Push(nil); err == nil {
+	if err := Seal(nil); err == nil {
 		t.Fatal("push with a mismatched signing key must fail")
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err == nil {
@@ -85,7 +85,7 @@ func TestPushDroppedMemberAborts(t *testing.T) {
 	}
 	writeEnv(t, "X=1\n")
 	feed(t, "y\n") // first-push foreign-recipient confirmation
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(backend.DefaultBlobPath)
@@ -99,7 +99,7 @@ func TestPushDroppedMemberAborts(t *testing.T) {
 	}
 
 	feed(t, "n\n") // decline "Lock them out?"
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push should return nil (aborted), got %v", err)
 	}
 	after, err := os.ReadFile(backend.DefaultBlobPath)
@@ -119,7 +119,7 @@ func TestPushDroppedMemberProceedsWhenConfirmed(t *testing.T) {
 	}
 	writeEnv(t, "X=1\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,7 +129,7 @@ func TestPushDroppedMemberProceedsWhenConfirmed(t *testing.T) {
 
 	// lockout confirmation, then the recipients-changed confirmation
 	feed(t, "y\ny\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestPushForeignBlobWarns(t *testing.T) {
 	writeEnv(t, "MINE=1\n")
 
 	feed(t, "n\n") // decline the overwrite warning
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push should return nil (aborted), got %v", err)
 	}
 	after, err := os.ReadFile(backend.DefaultBlobPath)
@@ -211,7 +211,7 @@ func TestPushUnsignedBlobPrompts(t *testing.T) {
 	writeEnv(t, "NEW=1\n")
 
 	feed(t, "n\n") // decline the unverifiable-blob prompt
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push should return nil (aborted), got %v", err)
 	}
 	after, err := os.ReadFile(backend.DefaultBlobPath)
@@ -223,7 +223,7 @@ func TestPushUnsignedBlobPrompts(t *testing.T) {
 	}
 
 	feed(t, "y\n") // approve it — push must then go through
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("approved push over an unsigned blob should succeed: %v", err)
 	}
 	after, err = os.ReadFile(backend.DefaultBlobPath)
@@ -263,7 +263,7 @@ func TestPushForgedManifestNotTrusted(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "n\n") // the unverifiable-blob prompt must appear; decline it
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push should return nil (aborted), got %v", err)
 	}
 	after, err := os.ReadFile(backend.DefaultBlobPath)

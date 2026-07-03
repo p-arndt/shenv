@@ -19,7 +19,7 @@ func TestPushPullRoundTrip(t *testing.T) {
 	writeEnv(t, secrets)
 
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err != nil {
@@ -31,7 +31,7 @@ func TestPushPullRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	feed(t, "y\n")
-	if err := Pull(nil); err != nil {
+	if err := Open(nil); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	got, err := os.ReadFile(defaultEnvFile)
@@ -47,7 +47,7 @@ func TestPushMissingEnv(t *testing.T) {
 	setup(t)
 	mustInit(t)
 	feed(t, "y\n")
-	if err := Push(nil); err == nil {
+	if err := Seal(nil); err == nil {
 		t.Fatal("push with no .env should error")
 	}
 }
@@ -59,7 +59,7 @@ func TestPushCustomInputFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	feed(t, "y\n")
-	if err := Push([]string{".env.prod"}); err != nil {
+	if err := Seal([]string{".env.prod"}); err != nil {
 		t.Fatalf("push .env.prod: %v", err)
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err != nil {
@@ -78,7 +78,7 @@ func TestPushForeignRecipientAborts(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "n\n") // decline the first-push confirmation
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push should return nil (aborted), got %v", err)
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err == nil {
@@ -95,7 +95,7 @@ func TestPushForeignRecipientProceeds(t *testing.T) {
 	writeEnv(t, "X=1\n")
 
 	feed(t, "y\n") // approve the first-push confirmation
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if _, err := os.Stat(backend.DefaultBlobPath); err != nil {
@@ -117,7 +117,7 @@ func TestPushSymlinkEnvRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	feed(t, "y\n")
-	if err := Push(nil); err == nil {
+	if err := Seal(nil); err == nil {
 		t.Fatal("pushing through a symlinked .env must be refused")
 	}
 }
@@ -125,7 +125,7 @@ func TestPushSymlinkEnvRejected(t *testing.T) {
 func TestPullNoBlob(t *testing.T) {
 	setup(t)
 	mustInit(t)
-	if err := Pull(nil); err == nil {
+	if err := Open(nil); err == nil {
 		t.Fatal("pull with no blob should error")
 	}
 }
@@ -137,14 +137,14 @@ func TestPullOverwriteDeclined(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "ORIGINAL=1\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 	// Diverge the local copy.
 	writeEnv(t, "LOCAL_EDIT=changed\n")
 
 	feed(t, "n\n") // decline overwrite
-	if err := Pull(nil); err != nil {
+	if err := Open(nil); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	got, _ := os.ReadFile(defaultEnvFile)
@@ -158,14 +158,14 @@ func TestPullForceSkipsPrompt(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "ORIGINAL=1\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 	writeEnv(t, "LOCAL_EDIT=changed\n")
 
 	// No stdin: --force must not prompt.
 	feed(t, "")
-	if err := Pull([]string{"--force"}); err != nil {
+	if err := Open([]string{"--force"}); err != nil {
 		t.Fatalf("pull --force: %v", err)
 	}
 	got, _ := os.ReadFile(defaultEnvFile)
@@ -179,7 +179,7 @@ func TestPullCustomOutTarget(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "K=v\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,7 +189,7 @@ func TestPullCustomOutTarget(t *testing.T) {
 		{"out3.env"}, // positional
 	} {
 		feed(t, "y\n")
-		if err := Pull(args); err != nil {
+		if err := Open(args); err != nil {
 			t.Fatalf("pull %v: %v", args, err)
 		}
 	}
@@ -209,12 +209,12 @@ func TestPullEnsuresOutputGitignored(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "K=v\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 
 	feed(t, "y\n")
-	if err := Pull([]string{"--out", ".env.production"}); err != nil {
+	if err := Open([]string{"--out", ".env.production"}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 
@@ -235,7 +235,7 @@ func TestPullEnsuresOutputGitignored(t *testing.T) {
 
 	// A second pull to the same target must not duplicate the entry.
 	feed(t, "y\n")
-	if err := Pull([]string{"--out", ".env.production"}); err != nil {
+	if err := Open([]string{"--out", ".env.production"}); err != nil {
 		t.Fatalf("second pull: %v", err)
 	}
 	again, err := os.ReadFile(".gitignore")
@@ -255,7 +255,7 @@ func TestPullSymlinkOutRejected(t *testing.T) {
 	mustInit(t)
 	writeEnv(t, "K=v\n")
 	feed(t, "y\n")
-	if err := Push(nil); err != nil {
+	if err := Seal(nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(defaultEnvFile); err != nil {
@@ -266,7 +266,7 @@ func TestPullSymlinkOutRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	feed(t, "y\n")
-	if err := Pull(nil); err == nil {
+	if err := Open(nil); err == nil {
 		t.Fatal("pulling through a symlinked target must be refused")
 	}
 }

@@ -58,7 +58,7 @@ func stateDir() (string, error) {
 	return filepath.Join(home, ".shenv", "state"), nil
 }
 
-// pushedRecipientsPath is where the recipient set from this repo's last push is
+// pushedRecipientsPath is where the recipient set from this repo's last seal is
 // recorded, keyed by the absolute recipients-file path so repos don't collide.
 func pushedRecipientsPath() (string, error) {
 	dir, err := stateDir()
@@ -84,7 +84,7 @@ func pushedRecipientsPath() (string, error) {
 func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Identity) (bool, error) {
 	prevBlob, err := store.Get()
 	if err != nil {
-		return true, nil // no existing blob — first push, nothing to guard
+		return true, nil // no existing blob — first seal, nothing to guard
 	}
 
 	payload, err := crypto.DecryptBytes(prevBlob, id)
@@ -101,7 +101,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 	// decryptable blob with a fabricated member list and steer — or suppress —
 	// the lockout warning. Verify before trusting it; on failure the guard
 	// degrades to a blunt overwrite prompt. Legitimate paths land here too (a
-	// blob from a pre-signing shenv, a last pusher who has since been removed),
+	// blob from a pre-signing shenv, a last sealer who has since been removed),
 	// hence the soft wording.
 	_, body, err := verifiedBody(payload)
 	if err != nil {
@@ -142,10 +142,10 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 }
 
 // confirmRecipients lists the members the secrets are about to be encrypted for and,
-// if that set changed since this machine's last push, shows the additions/removals
+// if that set changed since this machine's last seal, shows the additions/removals
 // and asks the user to confirm. This turns a silent recipient injection into a
 // visible, blocking prompt. selfKey is the user's own public key (may be empty);
-// on the very first push from a machine, any recipient beyond it must also be
+// on the very first seal from a machine, any recipient beyond it must also be
 // confirmed — the list comes from the repo, so a fresh clone could otherwise
 // exfiltrate to a planted key with no prompt at all. Returns true to proceed.
 func confirmRecipients(members []recipients.Member, selfKey string) (bool, error) {
@@ -161,12 +161,12 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	if !havePrev {
 		for _, m := range members {
 			if m.Key != selfKey {
-				fmt.Println("\nFirst push from this machine — the recipient list above comes from the repo.")
+				fmt.Println("\nFirst seal from this machine — the recipient list above comes from the repo.")
 				fmt.Print("Anyone listed will be able to decrypt these secrets. Continue? [y/N] ")
 				return confirm(), nil
 			}
 		}
-		return true, nil // first push, but only encrypting for yourself
+		return true, nil // first seal, but only encrypting for yourself
 	}
 
 	cur := recipientSet(members)
@@ -187,7 +187,7 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 
 	sort.Strings(added)
 	sort.Strings(removed)
-	fmt.Println("\nThe recipient list CHANGED since your last push:")
+	fmt.Println("\nThe recipient list CHANGED since your last seal:")
 	// Sanitized for the same reason as confirmExec: this prompt is what exposes
 	// a planted recipient, so it must render exactly what the file contains.
 	for _, a := range added {
@@ -213,8 +213,8 @@ func sanitizeTerm(s string) string {
 	}, s)
 }
 
-// rememberRecipients records the recipient set after a successful push so the next
-// push can detect changes.
+// rememberRecipients records the recipient set after a successful seal so the next
+// seal can detect changes.
 func rememberRecipients(members []recipients.Member) error {
 	path, err := pushedRecipientsPath()
 	if err != nil {
@@ -232,8 +232,8 @@ func rememberRecipients(members []recipients.Member) error {
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
-// loadPushedRecipients reads the recipient set from the last push. The second
-// result is false when no previous push has been recorded on this machine.
+// loadPushedRecipients reads the recipient set from the last seal. The second
+// result is false when no previous seal has been recorded on this machine.
 func loadPushedRecipients() (map[string]bool, bool, error) {
 	path, err := pushedRecipientsPath()
 	if err != nil {
@@ -260,8 +260,8 @@ func loadPushedRecipients() (map[string]bool, bool, error) {
 
 // recipientSet builds a comparable set of "name\tkey\tsignkey" entries, so a
 // swapped key, a renamed member, or a replaced signing key all register as a
-// change. The signing key matters as much as the encryption key: pull trusts it
-// to verify who pushed, so swapping it in recipients.shenv would let an attacker
+// change. The signing key matters as much as the encryption key: open trusts it
+// to verify who sealed, so swapping it in recipients.shenv would let an attacker
 // forge blobs "signed by" an existing member — that edit must hit this prompt.
 func recipientSet(members []recipients.Member) map[string]bool {
 	set := make(map[string]bool, len(members))

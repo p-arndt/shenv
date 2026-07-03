@@ -42,7 +42,7 @@ import (
 // retired key once enough users have upgraded. See docs/release-signing.md for
 // the full procedure. A var (not const) only so tests can substitute keys.
 var releaseVerifyKeys = []string{
-	"bHv4rxspPFiZF8sBmVtGR3AcXwJQyl47yDFDgi5pC7k",
+	"sQrabBts6F9SlNhvnwFw5HRHS8xHHM92frEJKpctvd4",
 }
 
 // releaseSigDomain domain-separates release signatures from env.shenv member
