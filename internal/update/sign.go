@@ -28,7 +28,7 @@ import (
 // releaseVerifyKey is the Ed25519 public key (base64, RawStdEncoding — the same
 // encoding as keys in recipients.shenv) that release signatures are checked
 // against. A var only so tests can substitute their own keypair.
-var releaseVerifyKey = "bHv4rxspPFiZF8sBmVtGR3AcXwJQyl47yDFDgi5pC7k"
+var releaseVerifyKey = "sQrabBts6F9SlNhvnwFw5HRHS8xHHM92frEJKpctvd4"
 
 // releaseSigDomain domain-separates release signatures from env.shenv member
 // signatures and anything else that might ever be signed with Ed25519 here.
