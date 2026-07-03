@@ -1,0 +1,13 @@
+# The workflows pin actions to commit SHAs (the release workflow holds the
+# release signing key, so mutable tags are not acceptable there). Dependabot
+# keeps those pins from fossilizing by PRing updated SHAs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly

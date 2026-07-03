@@ -2,6 +2,13 @@ name: Build and Publish Release
 permissions:
   contents: write
 
+# Two release runs uploading assets to the same tag would race; queue them
+# instead (never cancel — a half-cancelled release could leave a tag with
+# partial assets).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 on:
   push:
     tags: ['v*']
@@ -27,16 +34,23 @@ jobs:
     # Cross-compiling with CGO disabled means one Linux runner builds every
     # target — no per-OS matrix needed.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
+    # Third-party actions are pinned to full commit SHAs, not tags: tags are
+    # mutable, and this workflow holds RELEASE_SIGNING_KEY — the key the whole
+    # updater trust model reduces to. A repointed tag on any action here (the
+    # toolchain setup especially, since `go run` executes under it while the
+    # key is in the env) could exfiltrate it and forge releases every shipped
+    # updater would accept.
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           # Reads the Go version straight from go.mod so it never drifts.
           go-version-file: go.mod
@@ -45,9 +59,14 @@ jobs:
       - name: Determine version
         id: version
         shell: bash
+        # The version input reaches this script through env, never inline
+        # ${{ }} interpolation into the script body — interpolated input is
+        # how GitHub Actions script injection happens.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
+            VERSION="$INPUT_VERSION"
             if [ -z "$VERSION" ]; then
               # No version given: derive one from the VERSION file, suffixed with
               # the semver pre-release identifier "-pre.<run number>" so each
@@ -64,10 +83,28 @@ jobs:
             # Semver pre-release tags (e.g. v0.2.0-beta.1) are flagged automatically.
             if [[ "$VERSION" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
           fi
+          # Mirror of validVersion in internal/update: digits-first, semver
+          # charset, bounded length. A version the shipped updater would refuse
+          # must never become the latest release — `shenv update` would break
+          # for every user until a fixed release ships. Failing here also keeps
+          # the version safe to splice into file names and the tag.
+          if ! [[ "$VERSION" =~ ^[0-9][0-9A-Za-z.+-]{0,63}$ ]]; then
+            echo "::error::version '$VERSION' is not a valid release version (shipped updaters would refuse it)" >&2
+            exit 1
+          fi
           echo "VERSION=$VERSION"   >> "$GITHUB_OUTPUT"
           echo "TAG=v$VERSION"      >> "$GITHUB_OUTPUT"
           echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "DRAFT=$DRAFT"       >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        # Nothing gets built, signed, or published from a commit that fails
+        # vet + tests.
+        shell: bash
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./...
 
       - name: Build static binaries (all platforms)
         # CGO_ENABLED=0 links no libc -> every binary is fully static and
@@ -124,9 +161,15 @@ jobs:
             exit 1
           fi
           go run ./cmd/release-sign sign "dist/shenv_${VERSION}_checksums.txt"
+          # Round-trip: verify the fresh signature against the public key
+          # embedded in this commit's internal/update — the exact check every
+          # shipped updater runs. If the secret and the embedded key have
+          # drifted apart, fail the release now instead of publishing assets
+          # that no updater will accept.
+          go run ./cmd/release-sign selfcheck "dist/shenv_${VERSION}_checksums.txt"
 
       - name: Generate changelog
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
         with:
           config: cliff.toml
           # On a tag push the tag already exists, so --latest covers it. On a
@@ -149,7 +192,7 @@ jobs:
           cat CHANGELOG_BODY.md >> RELEASE_NOTES.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           tag_name: ${{ steps.version.outputs.TAG }}
           body_path: RELEASE_NOTES.md

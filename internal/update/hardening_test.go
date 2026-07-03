@@ -59,7 +59,10 @@ func TestLatestReleaseRejectsHostileTag(t *testing.T) {
 func TestAllowedURL(t *testing.T) {
 	ok := []string{
 		"https://api.github.com/x",
+		"https://github.com/p-arndt/shenv/releases/download/v1.0.0/a.tar.gz",
 		"https://objects.githubusercontent.com/y",
+		"https://release-assets.githubusercontent.com/z",
+		"https://GITHUB.COM/x",       // hostnames are case-insensitive
 		"http://127.0.0.1:8080/test", // loopback http for tests
 		"http://localhost:9/test",
 		"http://[::1]:9/test",
@@ -70,8 +73,12 @@ func TestAllowedURL(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"http://example.com/shenv.tar.gz", // plaintext to the internet
-		"http://192.168.1.1/x",            // plaintext, non-loopback
+		"http://example.com/shenv.tar.gz",           // plaintext to the internet
+		"http://192.168.1.1/x",                      // plaintext, non-loopback
+		"https://example.com/shenv.tar.gz",          // https, but not a GitHub host
+		"https://github.com.evil.example/x",         // allowlisted name as a prefix
+		"https://evilgithubusercontent.com/x",       // allowlisted name as a suffix, no dot
+		"https://github.com@evil.example/x",         // allowlisted name in userinfo
 		"ftp://example.com/x",
 		"file:///etc/passwd",
 		"://not a url",
@@ -99,24 +106,29 @@ func TestSelfUpdateRejectsPlainHTTPAsset(t *testing.T) {
 	defer srv.Close()
 	c := &Client{HTTP: srv.Client(), APIBase: srv.URL, Owner: "p-arndt", Repo: "shenv"}
 
-	got, err := c.download(context.Background(), "http://evil.example.com/swap.tar.gz", "release archive")
+	got, err := c.download(context.Background(), "http://evil.example.com/swap.tar.gz", "release archive", maxAsset)
 	if err == nil || got != nil {
 		t.Fatal("plain-http asset download must be refused")
 	}
 }
 
-// The redirect policy installed by NewClient must refuse an https→http downgrade
-// mid-chain, not just validate the first URL.
+// The redirect policy installed by NewClient must refuse an https→http
+// downgrade or a hop off GitHub's hosts mid-chain, not just validate the
+// first URL.
 func TestNewClientRedirectPolicyBlocksDowngrade(t *testing.T) {
 	c := NewClient(&http.Client{Timeout: time.Second})
-	req, _ := http.NewRequest(http.MethodGet, "http://example.com/step2", nil)
 	via := []*http.Request{{}}
+	req, _ := http.NewRequest(http.MethodGet, "http://example.com/step2", nil)
 	if err := c.HTTP.CheckRedirect(req, via); err == nil {
 		t.Fatal("redirect hop to plain http must be refused")
 	}
-	reqOK, _ := http.NewRequest(http.MethodGet, "https://example.com/step2", nil)
+	reqOffHost, _ := http.NewRequest(http.MethodGet, "https://example.com/step2", nil)
+	if err := c.HTTP.CheckRedirect(reqOffHost, via); err == nil {
+		t.Fatal("redirect hop to a non-GitHub host must be refused")
+	}
+	reqOK, _ := http.NewRequest(http.MethodGet, "https://objects.githubusercontent.com/step2", nil)
 	if err := c.HTTP.CheckRedirect(reqOK, via); err != nil {
-		t.Fatalf("https redirect hop should be allowed: %v", err)
+		t.Fatalf("https redirect hop to a GitHub host should be allowed: %v", err)
 	}
 }
 
@@ -168,14 +180,18 @@ func TestOversizedPayloadsRefused(t *testing.T) {
 		t.Error("zip binary past the cap must refuse, not truncate")
 	}
 
-	// Download: response body past the cap.
+	// Download: response body past the per-call limit. The same mechanism
+	// enforces the tighter maxChecksums/maxSig caps on the auxiliary assets.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write(big)
 	}))
 	defer srv.Close()
 	c := &Client{HTTP: srv.Client(), APIBase: srv.URL, Owner: "p-arndt", Repo: "shenv"}
-	if _, err := c.download(context.Background(), srv.URL+"/big", "release archive"); err == nil {
-		t.Error("download past the cap must refuse, not truncate")
+	if _, err := c.download(context.Background(), srv.URL+"/big", "release archive", 16); err == nil {
+		t.Error("download past the limit must refuse, not truncate")
+	}
+	if got, err := c.download(context.Background(), srv.URL+"/big", "release archive", int64(len(big))); err != nil || len(got) != len(big) {
+		t.Errorf("download at exactly the limit should succeed: %v", err)
 	}
 }
 

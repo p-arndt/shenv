@@ -30,9 +30,9 @@ func withTestReleaseKey(t *testing.T) func(name string, content []byte) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig := releaseVerifyKey
-	t.Cleanup(func() { releaseVerifyKey = orig })
-	releaseVerifyKey = base64.RawStdEncoding.EncodeToString(pub)
+	orig := releaseVerifyKeys
+	t.Cleanup(func() { releaseVerifyKeys = orig })
+	releaseVerifyKeys = []string{base64.RawStdEncoding.EncodeToString(pub)}
 	return func(name string, content []byte) string { return SignChecksums(priv, name, content) }
 }
 
