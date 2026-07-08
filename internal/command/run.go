@@ -32,10 +32,16 @@ func decryptEnv() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// payload and body are decrypted secret material that this function is done
+	// with once the caller's plaintext copy is split out; the returned plaintext
+	// is a fresh []byte (ExtractSignature/ExtractManifest go via string), so the
+	// caller zeroes that one, not us.
+	defer crypto.Zero(payload)
 	body, err := verifySigner(payload)
 	if err != nil {
 		return nil, err
 	}
+	defer crypto.Zero(body)
 	_, plaintext := recipients.ExtractManifest(body)
 	return plaintext, nil
 }
@@ -110,6 +116,9 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
+	// dotenv.Parse copies values into map strings, so plaintext is dead once it
+	// returns — the secrets now live only in child.Env (their intended home).
+	defer crypto.Zero(plaintext)
 	vars, err := dotenv.Parse(plaintext)
 	if err != nil {
 		return err

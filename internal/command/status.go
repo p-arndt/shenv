@@ -139,11 +139,18 @@ func sealedState(store backend.Backend, pub string) string {
 	if err != nil {
 		return "present, but your key can't decrypt it — ask a member to add you and re-seal"
 	}
+	// status only compares the sealed content with .env, but decrypting brought
+	// the plaintext into memory; zero it once the comparison is done.
+	defer crypto.Zero(payload)
 	signer, body, err := verifiedBody(payload)
 	if err != nil {
 		return "present, but unverified: " + oneLine(err)
 	}
+	// body and sealed are fresh copies of the decrypted payload (ExtractSignature
+	// and ExtractManifest allocate), so zeroing payload alone would leave them.
+	defer crypto.Zero(body)
 	_, sealed := recipients.ExtractManifest(body)
+	defer crypto.Zero(sealed)
 
 	// The signer comes from a decrypted manifest — signed, but authored by a
 	// possibly-hostile member — so sanitize it before it reaches the terminal,

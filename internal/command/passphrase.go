@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"golang.org/x/term"
+
+	"shenv/internal/crypto"
 )
 
 // stdin is a shared buffered reader so successive line reads (e.g. a passphrase
@@ -24,7 +26,12 @@ func readSecret(promptText string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return string(b), nil
+		// term.ReadPassword hands back the raw bytes; wipe them once copied into
+		// the returned string. The string can't be wiped — age's passphrase API is
+		// string-only — but this clears the one buffer we can.
+		pass := string(b)
+		crypto.Zero(b)
+		return pass, nil
 	}
 	line, err := stdin.ReadString('\n')
 	if err != nil && line == "" {

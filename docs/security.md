@@ -116,3 +116,17 @@ Beyond that, editors may still write undo history, swap, or backup copies to
 *configured* locations outside the temp directory (e.g. vim's `undodir`,
 editors with cloud sync). If that's in your threat model, point `$EDITOR` at
 something spartan.
+
+## In-memory secrets and process hardening
+
+The decrypted private key and `.env` plaintext necessarily live in process
+memory while shenv runs. Two best-effort measures shrink how far they can leak
+from there: on startup shenv disables core dumps (Unix `RLIMIT_CORE=0`, Windows
+Error Reporting exclusion) and, on Linux, marks itself non-dumpable
+(`PR_SET_DUMPABLE=0`) so a crash can't write those secrets into a dump and other
+same-user processes can't ptrace-attach to it; and it zeroes the secret buffers
+as soon as it's done with them. Both are honestly bounded — Go's garbage
+collector may already have copied the bytes (so zeroing can't guarantee
+erasure), `PR_SET_DUMPABLE` doesn't detach a debugger that launched the process
+and yields to root/`CAP_SYS_PTRACE`, and none of it defends against malware or
+root running as you. A hardware-backed key is the answer to that threat.

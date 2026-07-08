@@ -188,6 +188,14 @@ The private key in `~/.shenv/key.txt` decrypts every secret you have access to, 
   Keychain), bound to your login, so `open` stops asking. `shenv forget` removes it.
   On systems without a keychain (headless Linux, containers) `open` simply falls
   back to prompting — it never hard-fails.
+- **Process hardening (always, best-effort).** While shenv runs it disables core
+  dumps (and, on Linux, blocks other same-user processes from ptrace-attaching;
+  on Windows it excludes itself from Windows Error Reporting dumps), so a crash
+  can't spill the decrypted key or `.env` plaintext to disk. It also zeroes those
+  secret buffers as soon as it's done with them. Honest caveat: Go's garbage
+  collector may already have copied the bytes, so zeroing shrinks the exposure
+  window rather than guaranteeing erasure — and none of this stops malware or
+  root running as you. A hardware-backed key remains the answer to that.
 
 These layers compose: a synced/copied `key.txt` is useless without the passphrase,
 and the cached passphrase is bound to your OS login. Note: no software measure

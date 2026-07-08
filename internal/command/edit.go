@@ -62,16 +62,24 @@ func Edit(args []string) error {
 	if err != nil {
 		return fmt.Errorf("your key can't decrypt env.shenv — ask a member to `shenv add-member` you and re-seal: %w", err)
 	}
+	defer crypto.Zero(payload)
 	body, err := verifySigner(payload)
 	if err != nil {
 		return err
 	}
+	defer crypto.Zero(body)
+	// before and edited hold the old and new plaintext; both are re-sealed or
+	// written to the local .env below, then dead. edited outlives before but is
+	// passed through the same guarded seal path, so zeroing both at return is the
+	// natural end-of-life for the decrypted secrets in this process.
 	_, before := recipients.ExtractManifest(body)
+	defer crypto.Zero(before)
 
 	edited, err := editInTemp(before, editor)
 	if err != nil {
 		return err
 	}
+	defer crypto.Zero(edited)
 	if bytes.Equal(edited, before) {
 		fmt.Println("No changes — env.shenv left untouched.")
 		return nil

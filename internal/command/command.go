@@ -251,6 +251,10 @@ func Seal(args []string) error {
 	if err != nil {
 		return err
 	}
+	// sealEnv encrypts a copy (SealPayload builds a fresh buffer), so this read
+	// of the .env plaintext is dead once it returns — zero it then. The .env file
+	// itself stays on disk; this only clears the process's transient copy.
+	defer crypto.Zero(plaintext)
 
 	// Seal signs the payload, and the signature is only verifiable if the sealer
 	// is a member — so both an identity and a registration here are required.
@@ -374,6 +378,10 @@ func Open(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The decrypted secrets are written to the .env file below; zero the in-memory
+	// copy once this function is done with it. (The bytes are on disk by design —
+	// this only clears the process's transient copy.)
+	defer crypto.Zero(plaintext)
 
 	// Refuse to write the plaintext through a pre-planted symlink — including a
 	// committed symlink directory on the way — which could redirect secrets to

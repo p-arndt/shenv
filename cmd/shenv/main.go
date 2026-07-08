@@ -8,6 +8,7 @@ import (
 
 	"shenv/internal/buildinfo"
 	"shenv/internal/command"
+	"shenv/internal/harden"
 	"shenv/internal/update"
 )
 
@@ -42,6 +43,11 @@ func deprecatedAlias(old, replacement string) {
 }
 
 func main() {
+	// Best-effort process hardening before anything sensitive runs: disable
+	// core/crash dumps and block casual same-user memory inspection so decrypted
+	// secrets can't leak that way. Silent by design — it never fails the program.
+	harden.Process()
+
 	// Clean up any leftover binary from a previous self-update (Windows can't
 	// delete the running .exe during the swap, so it's removed on the next run).
 	update.CleanupLeftovers()

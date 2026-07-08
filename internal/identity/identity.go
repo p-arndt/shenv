@@ -66,6 +66,10 @@ func Load(ask PassphraseFunc) (*age.X25519Identity, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The interim string(plain) copy that age.ParseX25519Identity takes can't
+		// be wiped — age's API is string-only — so zeroing plain only shrinks the
+		// exposure, it doesn't erase every copy of the decrypted key.
+		defer crypto.Zero(plain)
 		return age.ParseX25519Identity(strings.TrimSpace(string(plain)))
 	}
 

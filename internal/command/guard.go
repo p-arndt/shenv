@@ -95,6 +95,9 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 		fmt.Print("Overwrite anyway? [y/N] ")
 		return confirm(), nil
 	}
+	// This decrypt of the previous blob exists only to read its manifest, but it
+	// also brings the old .env plaintext into memory; zero it once the guard is done.
+	defer crypto.Zero(payload)
 
 	// The manifest is only as trustworthy as its signature: the recipient keys
 	// are public, so anyone who can write to the backend could plant a
@@ -111,7 +114,12 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 		fmt.Print("Overwrite it? [y/N] ")
 		return confirm(), nil
 	}
-	prev, _ := recipients.ExtractManifest(body)
+	// body is a fresh copy of the decrypted payload (ExtractSignature allocates),
+	// so it needs its own wipe; the plaintext half of the manifest split is
+	// unused here and can be dropped immediately.
+	defer crypto.Zero(body)
+	prev, prevEnv := recipients.ExtractManifest(body)
+	crypto.Zero(prevEnv)
 	if len(prev) == 0 {
 		return true, nil // defensive: a signed blob always carries a manifest
 	}
