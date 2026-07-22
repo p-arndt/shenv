@@ -185,7 +185,9 @@ func createIdentity() (string, string, error) {
 
 // Whoami prints the user's public keys — what they share to get added elsewhere.
 // It never needs the passphrase for an encrypted key, except once for key files
-// from before signing existed (see identity.VerifyKey).
+// from before signing existed (see identity.VerifyKey). The add-member hint uses
+// defaultName() (git user name, then OS login) so it's copy-pasteable, matching
+// what `shenv init` records.
 func Whoami(args []string) error {
 	pub, err := identity.PublicKey()
 	if err != nil {
@@ -196,7 +198,7 @@ func Whoami(args []string) error {
 		return err
 	}
 	fmt.Printf("public key : %s\nsigning key: %s\n", pub, signPub)
-	fmt.Printf("\nA teammate grants you access with:\n  shenv add-member <your-name> %s %s\n", pub, signPub)
+	fmt.Printf("\nA teammate grants you access with:\n  shenv add-member %s %s %s\n", defaultName(), pub, signPub)
 	return nil
 }
 

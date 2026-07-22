@@ -158,6 +158,26 @@ func TestWhoamiPrintsBothKeys(t *testing.T) {
 	}
 }
 
+// TestWhoamiHintUsesDefaultName: the add-member hint must be copy-pasteable,
+// substituting the derived name (git user, then OS login) for the old
+// <your-name> placeholder — the same source `shenv init` uses.
+func TestWhoamiHintUsesDefaultName(t *testing.T) {
+	setup(t)
+	mustInit(t)
+	stubNameSources(t, "Ada Lovelace")
+	out := captureStdout(t, func() {
+		if err := Whoami(nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "shenv add-member Ada-Lovelace ") {
+		t.Fatalf("whoami hint must include the derived name, got:\n%s", out)
+	}
+	if strings.Contains(out, "<your-name>") {
+		t.Fatalf("whoami hint must not keep the placeholder, got:\n%s", out)
+	}
+}
+
 func TestWhoamiNoIdentity(t *testing.T) {
 	setup(t)
 	if err := Whoami(nil); err == nil {
