@@ -11,6 +11,7 @@ import (
 	"shenv/internal/identity"
 	"shenv/internal/keystore"
 	"shenv/internal/recipients"
+	"shenv/internal/style"
 )
 
 // Status prints a read-only overview of this repo's shenv state: your identity,
@@ -76,7 +77,7 @@ func membership(members []recipients.Member, pub string) string {
 	if self := memberByKey(members, pub); self != nil {
 		return fmt.Sprintf("registered here as %q", self.Name)
 	}
-	return "your key is NOT in " + recipients.Path + " — run `shenv init` to register"
+	return style.Warn("your key is NOT in "+recipients.Path) + " — run `shenv init` to register"
 }
 
 // team summarizes the recipient list. Names came through recipients.Load, which
@@ -161,9 +162,9 @@ func sealedState(store backend.Backend, pub string) string {
 	case err != nil:
 		return fmt.Sprintf("sealed by %s · no local .env — run `shenv open` to create it", signer)
 	case bytes.Equal(local, sealed):
-		return fmt.Sprintf("sealed by %s · in sync with .env", signer)
+		return fmt.Sprintf("sealed by %s · %s", signer, style.Good("in sync with .env"))
 	default:
-		return fmt.Sprintf("sealed by %s · .env differs — run `shenv seal` to update the sealed copy", signer)
+		return fmt.Sprintf("sealed by %s · %s — run `shenv seal` to update the sealed copy", signer, style.Warn(".env differs"))
 	}
 }
 
@@ -191,19 +192,20 @@ func localEnv() string {
 		return "none locally"
 	}
 	if isGitTracked(defaultEnvFile) {
-		return "present — WARNING: tracked by git; plaintext could be committed (`git rm --cached " + defaultEnvFile + "`)"
+		return style.Danger("present — WARNING: tracked by git; plaintext could be committed") + " (`git rm --cached " + defaultEnvFile + "`)"
 	}
 	return "present (local only)"
 }
 
 // statusRow prints one aligned "label : value" line. An empty label prints a
-// continuation line indented under the previous one.
+// continuation line indented under the previous one. The label is colored after
+// padding, so the alignment width is measured on the plain text, not the escapes.
 func statusRow(label, value string) {
 	if label == "" {
 		fmt.Printf("  %-10s   %s\n", "", value)
 		return
 	}
-	fmt.Printf("  %-10s : %s\n", label, value)
+	fmt.Printf("  %s : %s\n", style.Header(fmt.Sprintf("%-10s", label)), value)
 }
 
 // oneLine collapses a multi-line error into a single row-friendly string.

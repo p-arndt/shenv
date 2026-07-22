@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"shenv/internal/buildinfo"
+	"shenv/internal/style"
 	"shenv/internal/update"
 )
 
@@ -42,13 +43,13 @@ func Update(args []string) error {
 	}
 
 	if !update.IsNewer(res.Latest, res.Current) {
-		fmt.Printf("You're on the latest version (%s).\n", res.Current)
+		fmt.Println(style.Good(fmt.Sprintf("You're on the latest version (%s).", res.Current)))
 		return nil
 	}
 	if checkOnly {
-		fmt.Printf("A newer version is available: %s (you have %s). Run `shenv update` to upgrade.\n", res.Latest, res.Current)
+		fmt.Printf("%s %s (you have %s). Run `shenv update` to upgrade.\n", style.Warn("A newer version is available:"), style.Bold(res.Latest), res.Current)
 		return nil
 	}
-	fmt.Printf("Updated shenv %s → %s.\n", res.Current, res.Latest)
+	fmt.Println(style.Good(fmt.Sprintf("Updated shenv %s → %s.", res.Current, res.Latest)))
 	return nil
 }

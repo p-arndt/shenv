@@ -15,6 +15,7 @@ import (
 	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/recipients"
+	"shenv/internal/style"
 )
 
 // loadBackend resolves the configured backend and, for an exec backend, ensures
@@ -43,9 +44,8 @@ func confirmExec(getCmd, putCmd string) (bool, error) {
 	if putCmd != "" {
 		fmt.Printf("    put: %s\n", sanitizeTerm(putCmd))
 	}
-	fmt.Println("These come from the repo and could have been added by anyone with commit access.")
-	fmt.Print("Run them? [y/N] ")
-	return confirm(), nil
+	fmt.Println(style.Warn("These come from the repo and could have been added by anyone with commit access."))
+	return askYesNo("Run them?"), nil
 }
 
 // stateDir is the per-user shenv directory that holds local trust/bookkeeping
@@ -90,10 +90,9 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 	payload, err := crypto.DecryptBytes(prevBlob, id)
 	if err != nil {
 		fmt.Println("An encrypted env.shenv already exists, but your key cannot decrypt it.")
-		fmt.Println("Overwriting it would likely LOCK OUT everyone who can read it today.")
+		fmt.Println(style.Danger("Overwriting it would likely LOCK OUT everyone who can read it today."))
 		fmt.Println("If you are new here, ask a member to run `shenv add-member` with your key instead.")
-		fmt.Print("Overwrite anyway? [y/N] ")
-		return confirm(), nil
+		return askYesNo("Overwrite anyway?"), nil
 	}
 	// This decrypt of the previous blob exists only to read its manifest, but it
 	// also brings the old .env plaintext into memory; zero it once the guard is done.
@@ -108,11 +107,10 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 	// hence the soft wording.
 	_, body, err := verifiedBody(payload)
 	if err != nil {
-		fmt.Println("The existing env.shenv can't be verified, so who can decrypt it today is")
-		fmt.Println("unknown and the lockout check is skipped:")
+		fmt.Println(style.Warn("The existing env.shenv can't be verified, so who can decrypt it today is"))
+		fmt.Println(style.Warn("unknown and the lockout check is skipped:"))
 		fmt.Printf("    %v\n", err)
-		fmt.Print("Overwrite it? [y/N] ")
-		return confirm(), nil
+		return askYesNo("Overwrite it?"), nil
 	}
 	// body is a fresh copy of the decrypted payload (ExtractSignature allocates),
 	// so it needs its own wipe; the plaintext half of the manifest split is
@@ -138,15 +136,14 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 		return true, nil
 	}
 
-	fmt.Println("These members can decrypt the current env.shenv but are MISSING from", recipients.Path+":")
+	fmt.Println(style.Danger("These members can decrypt the current env.shenv but are MISSING from "+recipients.Path+":"))
 	for _, m := range dropped {
-		fmt.Printf("    - %s  %s\n", sanitizeTerm(m.Name), sanitizeTerm(m.Key))
+		fmt.Printf("    %s %s  %s\n", style.Danger("-"), sanitizeTerm(m.Name), sanitizeTerm(m.Key))
 	}
-	fmt.Println("Pushing now will LOCK THEM OUT. If that is unintended, restore them with")
+	fmt.Println(style.Danger("Pushing now will LOCK THEM OUT.") + " If that is unintended, restore them with")
 	fmt.Println("`shenv add-member` (or `git checkout " + recipients.Path + "`) first.")
 	fmt.Println("To revoke access on purpose, use `shenv remove-member` and confirm here.")
-	fmt.Print("Lock them out? [y/N] ")
-	return confirm(), nil
+	return askYesNo("Lock them out?"), nil
 }
 
 // confirmRecipients lists the members the secrets are about to be encrypted for and,
@@ -157,9 +154,9 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 // confirmed — the list comes from the repo, so a fresh clone could otherwise
 // exfiltrate to a planted key with no prompt at all. Returns true to proceed.
 func confirmRecipients(members []recipients.Member, selfKey string) (bool, error) {
-	fmt.Printf("Encrypting for %d recipient(s):\n", len(members))
+	fmt.Println(style.Header(fmt.Sprintf("Encrypting for %d recipient(s):", len(members))))
 	for _, m := range members {
-		fmt.Printf("    %s  %s\n", m.Name, m.Key)
+		fmt.Printf("    %s  %s\n", m.Name, style.Dim(m.Key))
 	}
 
 	prev, havePrev, err := loadPushedRecipients()
@@ -169,9 +166,9 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	if !havePrev {
 		for _, m := range members {
 			if m.Key != selfKey {
-				fmt.Println("\nFirst seal from this machine — the recipient list above comes from the repo.")
-				fmt.Print("Anyone listed will be able to decrypt these secrets. Continue? [y/N] ")
-				return confirm(), nil
+				fmt.Println("\n" + style.Warn("First seal from this machine — the recipient list above comes from the repo."))
+				fmt.Println(style.Warn("Anyone listed will be able to decrypt these secrets."))
+				return askYesNo("Continue?"), nil
 			}
 		}
 		return true, nil // first seal, but only encrypting for yourself
@@ -195,17 +192,19 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 
 	sort.Strings(added)
 	sort.Strings(removed)
-	fmt.Println("\nThe recipient list CHANGED since your last seal:")
+	fmt.Println("\n" + style.Warn("The recipient list CHANGED since your last seal:"))
 	// Sanitized for the same reason as confirmExec: this prompt is what exposes
 	// a planted recipient, so it must render exactly what the file contains.
+	// Additions render in warning yellow, not success green: this line's job is
+	// to expose a possibly-planted exfiltration key, so it must read as an alarm.
 	for _, a := range added {
-		fmt.Printf("    + %s\n", sanitizeTerm(strings.ReplaceAll(a, "\t", "  ")))
+		fmt.Println(style.Warn("    + " + sanitizeTerm(strings.ReplaceAll(a, "\t", "  "))))
 	}
 	for _, r := range removed {
-		fmt.Printf("    - %s\n", sanitizeTerm(strings.ReplaceAll(r, "\t", "  ")))
+		fmt.Println(style.Danger("    - " + sanitizeTerm(strings.ReplaceAll(r, "\t", "  "))))
 	}
-	fmt.Print("Anyone added here will be able to decrypt these secrets. Continue? [y/N] ")
-	return confirm(), nil
+	fmt.Println(style.Warn("Anyone added here will be able to decrypt these secrets."))
+	return askYesNo("Continue?"), nil
 }
 
 // sanitizeTerm strips control characters from strings that reach the terminal.

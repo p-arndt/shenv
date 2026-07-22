@@ -19,6 +19,7 @@ import (
 	"shenv/internal/crypto"
 	"shenv/internal/identity"
 	"shenv/internal/recipients"
+	"shenv/internal/style"
 )
 
 // defaultEnvFile is the local plaintext file — never committed.
@@ -42,7 +43,7 @@ func Init(args []string) error {
 			return err
 		}
 	} else {
-		fmt.Printf("Using your existing identity. Your public key:\n  %s\n\n", pub)
+		fmt.Printf("Using your existing identity. %s\n  %s\n\n", style.Header("Your public key:"), pub)
 		if signPub, err = identity.VerifyKey(unlocker(pub)); err != nil {
 			return err
 		}
@@ -51,12 +52,12 @@ func Init(args []string) error {
 	if err := recipients.Add(name, pub, signPub); err != nil {
 		return err
 	}
-	fmt.Printf("Registered you as %q in %s\n", name, recipients.Path)
+	fmt.Println(style.Good(fmt.Sprintf("Registered you as %q in %s", name, recipients.Path)))
 
 	if err := ensureGitignore(); err != nil {
 		return err
 	}
-	fmt.Println("Updated .gitignore (.env stays local, env.shenv is shared).")
+	fmt.Println(style.Dim("Updated .gitignore (.env stays local, env.shenv is shared)."))
 	fmt.Println("\nNext: put your secrets in .env, then run `shenv seal`.")
 	fmt.Printf("Remember to commit %s so your teammates keep you included when they seal.\n", recipients.Path)
 	return nil
@@ -149,7 +150,7 @@ func sanitizeName(s string) string {
 func Keygen(args []string) error {
 	if pub, err := identity.PublicKey(); err == nil {
 		path, _ := identity.Path()
-		fmt.Printf("You already have an identity at %s. Your public key:\n  %s\n", path, pub)
+		fmt.Printf("You already have an identity at %s. %s\n  %s\n", path, style.Header("Your public key:"), pub)
 		return nil
 	}
 	if _, _, err := createIdentity(); err != nil {
@@ -175,9 +176,9 @@ func createIdentity() (string, string, error) {
 		return "", "", err
 	}
 	pub := id.Recipient().String()
-	fmt.Printf("Created identity. Your public key:\n  %s\n\n", pub)
+	fmt.Printf("%s %s\n  %s\n\n", style.Good("Created identity."), style.Header("Your public key:"), pub)
 	if passphrase != "" {
-		fmt.Println("Your private key is encrypted at rest with your passphrase.")
+		fmt.Println(style.Dim("Your private key is encrypted at rest with your passphrase."))
 		offerToRemember(pub, passphrase)
 	}
 	return pub, crypto.VerifyKeyString(signKey), nil
@@ -197,8 +198,8 @@ func Whoami(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("public key : %s\nsigning key: %s\n", pub, signPub)
-	fmt.Printf("\nA teammate grants you access with:\n  shenv add-member %s %s %s\n", defaultName(), pub, signPub)
+	fmt.Printf("%s %s\n%s %s\n", style.Header("public key :"), pub, style.Header("signing key:"), signPub)
+	fmt.Printf("\nA teammate grants you access with:\n\n  %s\n\n", style.Bold(fmt.Sprintf("shenv add-member %s %s %s", defaultName(), pub, signPub)))
 	return nil
 }
 
@@ -212,7 +213,7 @@ func AddMember(args []string) error {
 	if err := recipients.Add(name, key, signKey); err != nil {
 		return err
 	}
-	fmt.Printf("Added %q. Run `shenv seal` to re-encrypt so they can open.\n", name)
+	fmt.Println(style.Good(fmt.Sprintf("Added %q.", name)) + " Run `shenv seal` to re-encrypt so they can open.")
 	return nil
 }
 
@@ -227,8 +228,8 @@ func RemoveMember(args []string) error {
 	if err := recipients.Remove(name); err != nil {
 		return err
 	}
-	fmt.Printf("Removed %q. Run `shenv seal` to re-encrypt without them, and commit %s.\n", name, recipients.Path)
-	fmt.Println("Note: they could decrypt everything sealed so far — rotate any secrets they shouldn't keep.")
+	fmt.Println(style.Good(fmt.Sprintf("Removed %q.", name)) + fmt.Sprintf(" Run `shenv seal` to re-encrypt without them, and commit %s.", recipients.Path))
+	fmt.Println(style.Warn("Note: they could decrypt everything sealed so far — rotate any secrets they shouldn't keep."))
 	return nil
 }
 
@@ -343,7 +344,7 @@ func sealEnv(plaintext []byte, source, selfKey string, loadID func() (*age.X2551
 	if err := rememberRecipients(members); err != nil {
 		return false, err
 	}
-	fmt.Printf("Encrypted %s → %s for %d member(s), signed as %q.\n", source, store, len(members), self.Name)
+	fmt.Println(style.Good(fmt.Sprintf("Encrypted %s → %s for %d member(s), signed as %q.", source, store, len(members), self.Name)))
 	return true, nil
 }
 
@@ -394,8 +395,7 @@ func Open(args []string) error {
 
 	if !force {
 		if existing, err := os.ReadFile(out); err == nil && !bytes.Equal(existing, plaintext) {
-			fmt.Printf("Local %s differs from the decrypted version. Overwrite? [y/N] ", out)
-			if !confirm() {
+			if !askYesNo(fmt.Sprintf("Local %s differs from the decrypted version. Overwrite?", out)) {
 				fmt.Println("Aborted. (Use --force to skip this check.)")
 				return nil
 			}
@@ -415,7 +415,7 @@ func Open(args []string) error {
 	// looser permissions, tighten them now (best-effort — a no-op on Windows,
 	// where the home/repo ACLs govern access).
 	_ = os.Chmod(out, 0o600)
-	fmt.Printf("Wrote %s (%d bytes). Keep it local — it's gitignored.\n", out, len(plaintext))
+	fmt.Println(style.Good(fmt.Sprintf("Wrote %s (%d bytes).", out, len(plaintext))) + style.Dim(" Keep it local — it's gitignored."))
 	return nil
 }
 
@@ -500,4 +500,14 @@ func confirm() bool {
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "y" || answer == "yes"
+}
+
+// askYesNo poses a blocking yes/no question and reads the answer. It sets the
+// question off with a leading blank line and colors it, so a prompt buried under
+// a wall of recipient/warning lines stands out as something waiting on input —
+// the easy-to-miss "type y to confirm" step. question is the text before the
+// choice, e.g. "Continue?"; the "[y/N]" suffix is appended here for consistency.
+func askYesNo(question string) bool {
+	fmt.Print("\n" + style.Prompt(question+" [y/N]") + " ")
+	return confirm()
 }

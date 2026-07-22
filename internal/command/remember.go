@@ -5,6 +5,7 @@ import (
 
 	"shenv/internal/identity"
 	"shenv/internal/keystore"
+	"shenv/internal/style"
 )
 
 // unlocker builds a PassphraseFunc that first tries the OS keychain and only
@@ -21,15 +22,14 @@ func unlocker(pub string) identity.PassphraseFunc {
 // offerToRemember asks, at init time, whether to cache the passphrase so future
 // opens don't prompt. A keychain failure is non-fatal — the key still works.
 func offerToRemember(pub, passphrase string) {
-	fmt.Print("Remember this passphrase in your OS keychain so open won't ask? [y/N] ")
-	if !confirm() {
+	if !askYesNo("Remember this passphrase in your OS keychain so open won't ask?") {
 		return
 	}
 	if err := keystore.Set(pub, passphrase); err != nil {
-		fmt.Printf("(could not save to keychain: %v)\n", err)
+		fmt.Println(style.Warn(fmt.Sprintf("(could not save to keychain: %v)", err)))
 		return
 	}
-	fmt.Println("Saved. Remove it anytime with `shenv forget`.")
+	fmt.Println(style.Good("Saved.") + " Remove it anytime with `shenv forget`.")
 }
 
 // Remember caches the key's passphrase in the OS keychain after verifying it
@@ -57,7 +57,7 @@ func Remember(args []string) error {
 	if err := keystore.Set(pub, pass); err != nil {
 		return fmt.Errorf("could not access the OS keychain: %w", err)
 	}
-	fmt.Println("Passphrase saved. `shenv open` won't ask on this machine anymore.")
+	fmt.Println(style.Good("Passphrase saved.") + " `shenv open` won't ask on this machine anymore.")
 	return nil
 }
 
@@ -70,6 +70,6 @@ func Forget(args []string) error {
 	if err := keystore.Delete(pub); err != nil {
 		return fmt.Errorf("could not access the OS keychain: %w", err)
 	}
-	fmt.Println("Removed the saved passphrase from this machine's keychain.")
+	fmt.Println(style.Good("Removed the saved passphrase from this machine's keychain."))
 	return nil
 }
