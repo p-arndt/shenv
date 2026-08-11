@@ -17,6 +17,15 @@ sees your secrets.
 </div>
 
 
+## What it looks like
+
+<p align="center">
+  <img src="./assets/demo.gif" alt="shenv: seal a .env, add a teammate's key, re-seal, and watch them open it on their own machine" width="900">
+</p>
+
+<sub>Two machines, one shell: the prompt colour is who you are. Every secret, key and teammate
+in the recording is invented — see <code>demo/shenv.tape</code>.</sub>
+
 ## How it works
 
 - Your **private key** lives in `~/.shenv/key.txt`. Created **once**, used for every repo — like an SSH key.

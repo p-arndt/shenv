@@ -13,3 +13,4 @@ release-signing-key*
 # shenv
 .env
 !env.shenv
+demo/.add-member.tape

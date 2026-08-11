@@ -80,6 +80,19 @@ release BUMP="patch":
     node scripts/release.mjs {{BUMP}}
 
 # ---------------------------------------------------------------------------
+# Demo
+# ---------------------------------------------------------------------------
+
+# Re-record the README demo GIF -> assets/demo.gif.
+# Builds shenv and runs it against a throwaway team in $TMPDIR (bare remote, two
+# HOMEs, invented secrets) — never your own key or repos. Needs vhs: brew install vhs.
+#   just demo               record
+#   just demo --keep        keep the throwaway world for inspection
+[unix]
+demo *ARGS:
+    bash scripts/demo.sh {{ARGS}}
+
+# ---------------------------------------------------------------------------
 # Housekeeping
 # ---------------------------------------------------------------------------
 
