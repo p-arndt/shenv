@@ -45,7 +45,7 @@ jobs:
       binary: shenv
       main: ./cmd/shenv
       archive-extra-files: README.md
-      changelog: git-cliff
+      changelog: stamp
       # `shenv update` refuses unsigned releases, so signing is mandatory; the
       # shared workflow fails the release if the key is missing. The signer is
       # compiled and the signature verified with the key removed from the
