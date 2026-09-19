@@ -1,1 +1,0 @@
-Two members whose names look the same but use different alphabets (for example "alice" with a Cyrillic "а") are rejected, so "signed by alice" really means the alice you know. Names like "jörg" are unaffected.

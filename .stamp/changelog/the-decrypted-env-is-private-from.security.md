@@ -1,1 +1,0 @@
-The decrypted .env is private from the first byte. It is written to a new owner-only file and then moved into place, instead of tightening permissions after the secrets were already on disk. On Windows it gets an owner-only ACL.

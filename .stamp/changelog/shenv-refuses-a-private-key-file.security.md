@@ -1,1 +1,0 @@
-shenv refuses a private key file that other users on the machine can read, and tells you to `chmod 600` it. This catches keys restored from a backup or copied from another computer. A symlink in place of the key file is not followed.

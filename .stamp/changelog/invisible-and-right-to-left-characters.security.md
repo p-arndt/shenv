@@ -1,1 +1,0 @@
-Invisible and right-to-left characters can no longer disguise what you approve. They are rejected in config.shenv (so an exec command looks like what it runs) and stripped from member names shown in prompts.

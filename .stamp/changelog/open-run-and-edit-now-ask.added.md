@@ -1,1 +1,0 @@
-`open`, `run` and `edit` now ask before trusting a changed recipients.shenv, the same way `seal` already did. You confirm a member change once per machine. A fresh machine (CI) trusts the list as cloned; set `SHENV_TRUST_RECIPIENTS=1` to accept changes without a prompt.
