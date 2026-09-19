@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.png" width="220" alt="shenv icon" />
+<img src="assets/logo.png" width="420" alt="shenv icon" />
 
-# shenv 
+# shenv
 
 **Share encrypted `.env` files across a small team — no server, no accounts, no plaintext in git.**
 
@@ -13,7 +13,7 @@ sees your secrets.
 
 [![Release](https://img.shields.io/github/v/release/p-arndt/shenv?display_name=tag&sort=semver)](https://github.com/p-arndt/shenv/releases)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
+[![Go version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 </div>
 
 
