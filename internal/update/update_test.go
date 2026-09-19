@@ -341,3 +341,28 @@ func TestSelfUpdateChecksumMismatch(t *testing.T) {
 		t.Errorf("binary changed despite failed update: %q", got)
 	}
 }
+
+// TestReplaceExecutableKeepsMode: an install restricted on purpose must not
+// become world-executable by updating itself.
+func TestReplaceExecutableKeepsMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("mode bits are not meaningful on Windows")
+	}
+	exe := filepath.Join(t.TempDir(), "shenv")
+	if err := os.WriteFile(exe, []byte("old"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(exe, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutable(exe, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o750 {
+		t.Errorf("mode after update = %o, want 750", got)
+	}
+}

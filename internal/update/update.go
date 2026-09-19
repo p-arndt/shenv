@@ -108,7 +108,7 @@ func allowedURL(raw string) error {
 		return nil
 	case u.Scheme == "https":
 		return fmt.Errorf("refusing to download a release asset from a non-GitHub host")
-	case u.Scheme == "http" && isLoopback(u.Hostname()):
+	case u.Scheme == "http" && allowLoopbackHTTP && isLoopback(u.Hostname()):
 		return nil
 	}
 	return fmt.Errorf("refusing to download a release asset over a non-https URL")
@@ -126,6 +126,11 @@ func isGitHubHost(host string) bool {
 	}
 	return strings.HasSuffix(host, ".githubusercontent.com")
 }
+
+// allowLoopbackHTTP is only ever set by tests, which serve release assets from a
+// local httptest server. In a shipped binary a tampered release must not be able
+// to aim every updating client at services listening on its own loopback.
+var allowLoopbackHTTP = false
 
 // isLoopback reports whether host is localhost or a loopback IP.
 func isLoopback(host string) bool {
@@ -399,7 +404,13 @@ func replaceExecutable(exePath string, newBin []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
+	// Keep the installed binary's mode: an install deliberately restricted to a
+	// group must not become world-executable by updating itself.
+	mode := os.FileMode(0o755)
+	if info, err := os.Stat(exePath); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
 		return err
 	}
 
@@ -426,6 +437,11 @@ func replaceExecutable(exePath string, newBin []byte) error {
 // Windows self-update. Called once at startup; a no-op if there's nothing to do
 // or the file is still locked.
 func CleanupLeftovers() {
+	// Only the Windows swap creates "<exe>.old"; elsewhere a file by that name is
+	// the user's own and not ours to delete.
+	if runtime.GOOS != "windows" {
+		return
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return

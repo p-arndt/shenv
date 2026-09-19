@@ -92,7 +92,9 @@ func NotifyIfAvailable(w io.Writer, current string) {
 		fmt.Fprintf(w, "\nA newer shenv is available: %s (you have %s). Run `shenv update` to upgrade.\n", st.Latest, current)
 	}
 
-	if time.Since(st.LastCheck) < checkInterval {
+	// A timestamp in the future (clock jump, tampered cache) must count as stale,
+	// or the notice that tells users to pick up security fixes never refreshes.
+	if since := time.Since(st.LastCheck); since >= 0 && since < checkInterval {
 		return
 	}
 	refresh(NewClient(&http.Client{Timeout: noticeTimeout}), st)

@@ -66,3 +66,15 @@ func TestNotifySilentForDevBuild(t *testing.T) {
 		t.Errorf("dev builds should never see the notice, got %q", buf.String())
 	}
 }
+
+// TestNotifyTreatsFutureCheckAsStale: a last_check in the future would otherwise
+// suppress the refresh forever, silencing the only hint that a fix is available.
+func TestNotifyTreatsFutureCheckAsStale(t *testing.T) {
+	seedState(t, state{LastCheck: time.Now().Add(100 * 365 * 24 * time.Hour), Latest: "0.4.0"})
+	t.Setenv("SHENV_NO_UPDATE_CHECK", "")
+
+	NotifyIfAvailable(&bytes.Buffer{}, "0.4.0")
+	if got := loadState().LastCheck; got.After(time.Now().Add(time.Minute)) {
+		t.Errorf("future last_check %v was kept instead of being refreshed", got)
+	}
+}

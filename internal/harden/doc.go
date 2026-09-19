@@ -1,8 +1,10 @@
 // Package harden applies best-effort, process-wide mitigations that shrink the
 // window in which shenv's in-memory secrets — the decrypted private key and
 // .env plaintext — could leak. It closes two casual paths: a crash writing a
-// core/crash dump that contains those secrets to disk, and another process
-// running as the same user peeking into this one's memory after startup.
+// core/crash dump that contains those secrets to disk, and — on Linux and
+// Windows only — another process running as the same user peeking into this
+// one's memory after startup. On macOS and the BSDs only the core-dump limit is
+// applied, and on no platform is memory locked against swap or hibernation.
 //
 // The threat model is deliberately narrow. These are hygiene measures against
 // accidental disk spillage and casual same-user inspection; they are NOT

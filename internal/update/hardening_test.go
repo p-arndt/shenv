@@ -73,12 +73,12 @@ func TestAllowedURL(t *testing.T) {
 		}
 	}
 	bad := []string{
-		"http://example.com/shenv.tar.gz",           // plaintext to the internet
-		"http://192.168.1.1/x",                      // plaintext, non-loopback
-		"https://example.com/shenv.tar.gz",          // https, but not a GitHub host
-		"https://github.com.evil.example/x",         // allowlisted name as a prefix
-		"https://evilgithubusercontent.com/x",       // allowlisted name as a suffix, no dot
-		"https://github.com@evil.example/x",         // allowlisted name in userinfo
+		"http://example.com/shenv.tar.gz",     // plaintext to the internet
+		"http://192.168.1.1/x",                // plaintext, non-loopback
+		"https://example.com/shenv.tar.gz",    // https, but not a GitHub host
+		"https://github.com.evil.example/x",   // allowlisted name as a prefix
+		"https://evilgithubusercontent.com/x", // allowlisted name as a suffix, no dot
+		"https://github.com@evil.example/x",   // allowlisted name in userinfo
 		"ftp://example.com/x",
 		"file:///etc/passwd",
 		"://not a url",
@@ -203,5 +203,18 @@ func TestNoticeCacheRejectsHostileVersion(t *testing.T) {
 	NotifyIfAvailable(&buf, "0.3.1")
 	if buf.Len() != 0 {
 		t.Errorf("hostile cached version must be dropped, got %q", buf.String())
+	}
+}
+
+// TestAllowedURLRejectsLoopbackOutsideTests: the loopback exception exists for
+// the test servers only. A shipped binary must not let tampered release metadata
+// aim the updater at services on the user's own machine.
+func TestAllowedURLRejectsLoopbackOutsideTests(t *testing.T) {
+	allowLoopbackHTTP = false
+	t.Cleanup(func() { allowLoopbackHTTP = true })
+	for _, u := range []string{"http://127.0.0.1:2375/x", "http://localhost:8080/x", "http://[::1]/x"} {
+		if err := allowedURL(u); err == nil {
+			t.Errorf("allowedURL(%q) = nil, want error", u)
+		}
 	}
 }
