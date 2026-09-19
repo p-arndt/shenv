@@ -249,7 +249,7 @@ shenv assumes a small, mutually trusted team. A few highlights:
 Full threat model — what signing and pinning do and don't cover, replays, and `run`'s
 process-environment exposure — is in [docs/security.md](docs/security.md).
 
-> The security design was reviewed by Claude (Fable 5) 🤖 — a sanity check, not a
+> The security design was reviewed by Claude (Fable 5.1 and GPT-6-Astra) 🤖 — a sanity check, not a
 > substitute for a professional audit. Found a hole? Please report it **privately**
 > via [GitHub's security advisories](https://github.com/p-arndt/shenv/security/advisories/new),
 > not a public issue. Regular bugs and feature requests are welcome as
