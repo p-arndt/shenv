@@ -143,7 +143,7 @@ func sealedState(store backend.Backend, pub string) string {
 	// status only compares the sealed content with .env, but decrypting brought
 	// the plaintext into memory; zero it once the comparison is done.
 	defer crypto.Zero(payload)
-	signer, body, err := verifiedBody(payload)
+	signer, body, err := verifiedBody(payload, false)
 	if err != nil {
 		return "present, but unverified: " + oneLine(err)
 	}

@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -65,5 +66,45 @@ func TestConfigRejectsInvisibleRunes(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Fatalf("config containing %U must be rejected", []rune(r)[0])
 		}
+	}
+}
+
+// TestProjectIDValidation: the id becomes a line of the signed bytes, so it must
+// stay a single unambiguous token.
+func TestProjectIDValidation(t *testing.T) {
+	inRepo(t)
+	writeConfig(t, "project = my-app_1.prod\n")
+	if id, err := Project(); err != nil || id != "my-app_1.prod" {
+		t.Fatalf("Project() = %q, %v", id, err)
+	}
+	for _, bad := range []string{"two words", "a/b", strings.Repeat("x", maxProjectLen+1)} {
+		writeConfig(t, "project = "+bad+"\n")
+		if _, err := Project(); err == nil {
+			t.Errorf("project id %q must be rejected", bad)
+		}
+	}
+}
+
+// TestInitProjectOnlyTouchesNewRepos: binding an existing blob invalidates it,
+// so init must never do that on its own.
+func TestInitProjectOnlyTouchesNewRepos(t *testing.T) {
+	inRepo(t)
+	if created, err := InitProject(); err != nil || !created {
+		t.Fatalf("InitProject in an empty repo = %v, %v", created, err)
+	}
+	id, err := Project()
+	if err != nil || len(id) != 32 {
+		t.Fatalf("Project() after init = %q, %v", id, err)
+	}
+	if created, _ := InitProject(); created {
+		t.Fatal("an existing id must be kept")
+	}
+
+	inRepo(t)
+	if err := os.WriteFile(DefaultBlobPath, []byte("sealed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if created, _ := InitProject(); created {
+		t.Fatal("a repo that already has a blob must be left alone")
 	}
 }

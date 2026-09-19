@@ -22,12 +22,39 @@ A blob that isn't signed by a *current member* is rejected outright, and every
 open tells you who sealed it (`signed by bob`). The signing key is derived from
 your age key, so there is still only one secret to protect and back up.
 
+## Blobs are bound to their project
+
+A signature says *who* sealed a blob, not *what for*. The same person is usually
+a member of several repos, so a blob they sealed for project A would verify in
+project B too — anyone with write access to B's storage could swap it in, no key
+needed. When `config.shenv` has a `project = <id>` line, that id is part of the
+signed bytes, and `open`/`run`/`edit` only accept a blob signed for the id in
+*your* checkout. `shenv init` writes a random id for new repos.
+
+Existing repos keep working without one. To bind one: `shenv open`, add the
+`project` line, `shenv seal`, commit both. From then on unbound blobs are
+rejected, and teammates on a shenv older than this feature must update — their
+version cannot verify a bound blob and refuses it.
+
+## Member changes are confirmed on open, too
+
+`recipients.shenv` holds the signing keys blobs are verified against, and it
+arrives over the same channel as everything else. Someone with **commit access to
+the repo** could add their own key and sign a replacement blob. So shenv pins the
+member list this machine last accepted (in `~/.shenv/state`, outside the repo)
+and `open`/`run`/`edit` ask before trusting a changed one — the same prompt, and
+the same pin, as seal's. A first use on a machine has nothing to compare against
+and trusts the list as cloned. Non-interactive runs that must accept a change set
+`SHENV_TRUST_RECIPIENTS=1`; the change is still printed.
+
+Two members whose names only differ by lookalike characters (a Cyrillic `а` in
+`аlice`) are rejected, so "signed by alice" means the alice you know.
+
 ## What signing does not cover
 
-`recipients.shenv` is the trust anchor, so someone with **commit access to the
-repo** could swap both a key and the blob. That edit is visible in git history
-and guarded by seal's recipient-change prompt, but `open` does not independently
-detect it.
+The pin turns a swapped key into a prompt, not into an impossibility: confirm it
+without reading and the attacker's blob verifies. A fresh clone trusts what it
+cloned.
 
 Replays aren't prevented either: an old, validly-signed blob can be restored by
 anyone with write access — enable storage versioning to spot this.

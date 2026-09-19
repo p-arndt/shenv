@@ -113,7 +113,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 	// degrades to a blunt overwrite prompt. Legitimate paths land here too (a
 	// blob from a pre-signing shenv, a last sealer who has since been removed),
 	// hence the soft wording.
-	_, body, err := verifiedBody(payload)
+	_, body, err := verifiedBody(payload, true)
 	if err != nil {
 		fmt.Println(style.Warn("The existing env.shenv can't be verified, so who can decrypt it today is"))
 		fmt.Println(style.Warn("unknown and the lockout check is skipped:"))
@@ -182,24 +182,11 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 		return true, nil // first seal, but only encrypting for yourself
 	}
 
-	cur := recipientSet(members)
-	var added, removed []string
-	for k := range cur {
-		if !prev[k] {
-			added = append(added, k)
-		}
-	}
-	for k := range prev {
-		if !cur[k] {
-			removed = append(removed, k)
-		}
-	}
+	added, removed := recipientDiff(prev, recipientSet(members))
 	if len(added) == 0 && len(removed) == 0 {
 		return true, nil
 	}
 
-	sort.Strings(added)
-	sort.Strings(removed)
 	fmt.Println("\n" + style.Warn("The recipient list CHANGED since your last seal:"))
 	// Sanitized for the same reason as confirmExec: this prompt is what exposes
 	// a planted recipient, so it must render exactly what the file contains.
@@ -213,6 +200,71 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	}
 	fmt.Println(style.Warn("Anyone added here will be able to decrypt these secrets."))
 	return askYesNo("Continue?"), nil
+}
+
+// recipientDiff lists the entries that appeared and disappeared between two
+// recipient sets, sorted for stable output.
+func recipientDiff(prev, cur map[string]bool) (added, removed []string) {
+	for k := range cur {
+		if !prev[k] {
+			added = append(added, k)
+		}
+	}
+	for k := range prev {
+		if !cur[k] {
+			removed = append(removed, k)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	return added, removed
+}
+
+// confirmPinnedRecipients guards the read side the way confirmRecipients guards
+// seal. open, run and edit verify the blob against the signing keys in
+// recipients.shenv, which arrives over the same untrusted channel as the blob:
+// whoever can change both can add their own key and sign whatever they like. So
+// the set this machine last accepted is pinned, and a changed file has to be
+// confirmed before its keys are trusted. The pin is the one seal records — a
+// change confirmed on either side is not asked about again on the other.
+//
+// Everything goes to stderr: `shenv run` hands stdout to the child's consumer.
+func confirmPinnedRecipients() error {
+	members, err := recipients.Load()
+	if err != nil || len(members) == 0 {
+		return err // an empty list fails verification on its own
+	}
+	prev, havePrev, err := loadPushedRecipients()
+	if err != nil {
+		return err
+	}
+	if !havePrev {
+		// Nothing to compare a first use against; trust on first use, and say so.
+		fmt.Fprintf(os.Stderr, "Trusting the %d member(s) in %s from now on; later changes will need confirmation.\n", len(members), recipients.Path)
+		return rememberRecipients(members)
+	}
+	added, removed := recipientDiff(prev, recipientSet(members))
+	if len(added) == 0 && len(removed) == 0 {
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, style.Warn(recipients.Path+" CHANGED since this machine last trusted it:"))
+	for _, a := range added {
+		fmt.Fprintln(os.Stderr, style.Warn("    + "+sanitizeTerm(strings.ReplaceAll(a, "\t", "  "))))
+	}
+	for _, r := range removed {
+		fmt.Fprintln(os.Stderr, style.Danger("    - "+sanitizeTerm(strings.ReplaceAll(r, "\t", "  "))))
+	}
+	fmt.Fprintln(os.Stderr, style.Warn("A blob signed by anyone added here will be accepted as genuine."))
+	if os.Getenv("SHENV_TRUST_RECIPIENTS") == "1" {
+		fmt.Fprintln(os.Stderr, "shenv: SHENV_TRUST_RECIPIENTS=1 — accepting the change without asking")
+		return rememberRecipients(members)
+	}
+	fmt.Fprint(os.Stderr, "\n"+style.Prompt("Trust the new member list? [y/N]")+" ")
+	if !confirm() {
+		return fmt.Errorf("%s changed and was not confirmed — refusing to verify env.shenv against it", recipients.Path)
+	}
+	return rememberRecipients(members)
 }
 
 // sanitizeTerm strips non-graphic runes from strings that reach the terminal.

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"shenv/internal/backend"
 	"shenv/internal/crypto"
 	"shenv/internal/dotenv"
 	"shenv/internal/identity"
@@ -53,7 +54,10 @@ func decryptEnv() ([]byte, error) {
 // ties it to a current member, so a replaced blob is rejected instead of
 // silently feeding attacker-chosen values into the app.
 func verifySigner(payload []byte) ([]byte, error) {
-	signer, body, err := verifiedBody(payload)
+	if err := confirmPinnedRecipients(); err != nil {
+		return nil, err
+	}
+	signer, body, err := verifiedBody(payload, false)
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +67,28 @@ func verifySigner(payload []byte) ([]byte, error) {
 
 // verifiedBody performs the actual signature check, silently, so seal's
 // lockout guard can reuse it without printing open's confirmation line.
-func verifiedBody(payload []byte) (string, []byte, error) {
+//
+// allowUnbound accepts a legacy signature that names no project even though
+// config.shenv expects one. Only seal's lockout guard sets it: it reads the old
+// manifest of a blob it is about to replace with a bound one, which is how a
+// repo migrates. Anything that uses the secrets must not — an unbound blob is
+// exactly what another project's blob looks like.
+func verifiedBody(payload []byte, allowUnbound bool) (string, []byte, error) {
 	signer, sig, body, ok := recipients.ExtractSignature(payload)
 	if !ok {
 		return "", nil, fmt.Errorf("env.shenv is not signed — it was sealed by an older shenv; ask a member to run `shenv seal` with this version")
+	}
+	project, err := backend.Project()
+	if err != nil {
+		return "", nil, err
+	}
+	switch bound := recipients.IsBound(payload); {
+	case bound && project == "":
+		return "", nil, fmt.Errorf("env.shenv is bound to a project, but config.shenv names none — pull the config.shenv that belongs to it (its `project` line may have been removed)")
+	case !bound && project != "" && !allowUnbound:
+		return "", nil, fmt.Errorf("env.shenv is not bound to project %q from config.shenv — it was sealed before the project id was set, or it belongs to another project; to migrate, `shenv open` without the `project` line, add it back, then `shenv seal`", project)
+	case !bound:
+		project = ""
 	}
 	members, err := recipients.Load()
 	if err != nil {
@@ -84,8 +106,8 @@ func verifiedBody(payload []byte) (string, []byte, error) {
 	if verifyKey == nil {
 		return "", nil, fmt.Errorf("env.shenv was signed by %q, who is not in %s — if they were just removed, a remaining member must seal a fresh env.shenv; otherwise the blob may have been replaced", signer, recipients.Path)
 	}
-	if !recipients.VerifySignature(body, sig, verifyKey) {
-		return "", nil, fmt.Errorf("SIGNATURE VERIFICATION FAILED: env.shenv claims to be from %q but was not signed with their key — refusing to use it; the blob may have been tampered with or replaced", signer)
+	if !recipients.VerifySignature(body, sig, verifyKey, project) {
+		return "", nil, fmt.Errorf("SIGNATURE VERIFICATION FAILED: env.shenv claims to be from %q but was not signed with their key for this project — refusing to use it; the blob may have been tampered with, replaced, or sealed for another project", signer)
 	}
 	return signer, body, nil
 }

@@ -65,7 +65,7 @@ func TestPullRejectsForgedSignature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forged := recipients.SealPayload([]byte("EVIL=1\n"), members, "me", attackerKey)
+	forged := recipients.SealPayload([]byte("EVIL=1\n"), members, "me", attackerKey, "")
 	plantBlob(t, forged, pub)
 
 	feed(t, "")
@@ -88,7 +88,7 @@ func TestPullRejectsUnknownSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plantBlob(t, recipients.SealPayload([]byte("X=1\n"), members, "stranger", strangerKey), pub)
+	plantBlob(t, recipients.SealPayload([]byte("X=1\n"), members, "stranger", strangerKey, ""), pub)
 
 	feed(t, "")
 	if err := Open(nil); err == nil {
@@ -121,7 +121,7 @@ func TestPullAcceptsTeammatesPush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	blob, err := crypto.EncryptBytes(recipients.SealPayload([]byte("SHARED=1\n"), members, "mate", mateSign), keys)
+	blob, err := crypto.EncryptBytes(recipients.SealPayload([]byte("SHARED=1\n"), members, "mate", mateSign, ""), keys)
 	if err != nil {
 		t.Fatal(err)
 	}

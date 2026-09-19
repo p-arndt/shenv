@@ -1,6 +1,7 @@
 package recipients
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
@@ -20,6 +21,12 @@ import (
 // public, so without this anyone could encrypt a replacement blob "for the
 // team"; the signature proves a current member produced it.
 //
+// A signature alone says who sealed a blob, not what for: the same member is
+// often trusted in several repos, so a validly signed blob from one project
+// would verify in another. When config.shenv names a project, its id is mixed
+// into the signed bytes (and the signer line becomes "#shenv:signer2"), so a
+// blob only verifies where the local, committed config expects that project.
+//
 // Format: a "#shenv:signer <name> <sig>" line, then one
 // "#shenv:member <name> <key> <sign-key>" line per member, then the env
 // content. All lines are valid dotenv comments, so even an unstripped payload
@@ -31,9 +38,16 @@ const manifestPrefix = "#shenv:member "
 // signerPrefix marks the signature line at the top of the payload.
 const signerPrefix = "#shenv:signer "
 
+// boundSignerPrefix marks a signature that also covers a project id.
+const boundSignerPrefix = "#shenv:signer2 "
+
 // signContext domain-separates payload signatures from any other use of the
 // same Ed25519 key.
 const signContext = "shenv payload v1\n"
+
+// boundSignContext is the context of project-bound signatures; the project id
+// follows it on its own line.
+const boundSignContext = "shenv payload v2\n"
 
 // EmbedManifest prepends the member list to the plaintext before encryption.
 func EmbedManifest(plaintext []byte, members []Member) []byte {
@@ -74,11 +88,16 @@ func ExtractManifest(payload []byte) ([]Member, []byte) {
 // SealPayload assembles what push encrypts: the signer line, the member
 // manifest, then the env content. The signature covers everything after the
 // signer line, so neither the member list nor the secrets can be altered
-// without the signer's private key.
-func SealPayload(plaintext []byte, members []Member, signer string, key ed25519.PrivateKey) []byte {
+// without the signer's private key. A non-empty project binds the signature to
+// that project; an empty one produces the unbound legacy form.
+func SealPayload(plaintext []byte, members []Member, signer string, key ed25519.PrivateKey, project string) []byte {
 	body := EmbedManifest(plaintext, members)
-	sig := ed25519.Sign(key, signedBytes(body))
-	header := fmt.Sprintf("%s%s %s\n", signerPrefix, signer, base64.RawStdEncoding.EncodeToString(sig))
+	sig := ed25519.Sign(key, signedBytes(body, project))
+	prefix := signerPrefix
+	if project != "" {
+		prefix = boundSignerPrefix
+	}
+	header := fmt.Sprintf("%s%s %s\n", prefix, signer, base64.RawStdEncoding.EncodeToString(sig))
 	return append([]byte(header), body...)
 }
 
@@ -88,10 +107,14 @@ func SealPayload(plaintext []byte, members []Member, signer string, key ed25519.
 // the payload then passes through as the body.
 func ExtractSignature(payload []byte) (signer string, sig []byte, body []byte, ok bool) {
 	line, rest, found := strings.Cut(string(payload), "\n")
-	if !found || !strings.HasPrefix(line, signerPrefix) {
+	prefix := signerPrefix
+	if IsBound(payload) {
+		prefix = boundSignerPrefix
+	}
+	if !found || !strings.HasPrefix(line, prefix) {
 		return "", nil, payload, false
 	}
-	fields := strings.Fields(strings.TrimPrefix(line, signerPrefix))
+	fields := strings.Fields(strings.TrimPrefix(line, prefix))
 	if len(fields) != 2 {
 		return "", nil, payload, false
 	}
@@ -102,12 +125,24 @@ func ExtractSignature(payload []byte) (signer string, sig []byte, body []byte, o
 	return fields[0], raw, []byte(rest), true
 }
 
-// VerifySignature reports whether sig over body was produced by verifyKey.
-func VerifySignature(body, sig []byte, verifyKey ed25519.PublicKey) bool {
-	return ed25519.Verify(verifyKey, signedBytes(body), sig)
+// IsBound reports whether the payload's signature claims to cover a project id.
+// The claim itself is unauthenticated — it only selects which bytes the
+// signature is checked against, and the project those bytes name always comes
+// from the local config, never from the payload.
+func IsBound(payload []byte) bool {
+	return bytes.HasPrefix(payload, []byte(boundSignerPrefix))
+}
+
+// VerifySignature reports whether sig over body was produced by verifyKey. An
+// empty project checks the unbound legacy form.
+func VerifySignature(body, sig []byte, verifyKey ed25519.PublicKey, project string) bool {
+	return ed25519.Verify(verifyKey, signedBytes(body, project), sig)
 }
 
 // signedBytes is the exact byte string signatures are computed over.
-func signedBytes(body []byte) []byte {
-	return append([]byte(signContext), body...)
+func signedBytes(body []byte, project string) []byte {
+	if project == "" {
+		return append([]byte(signContext), body...)
+	}
+	return append([]byte(boundSignContext+"project "+project+"\n"), body...)
 }

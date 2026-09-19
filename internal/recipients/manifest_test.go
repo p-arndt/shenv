@@ -64,13 +64,13 @@ func TestSealPayloadRoundTrip(t *testing.T) {
 	members := []Member{{Name: "alice", Key: "age1alice", SignKey: "signalice"}}
 	plaintext := []byte("API_KEY=abc\n")
 
-	payload := SealPayload(plaintext, members, "alice", signKey)
+	payload := SealPayload(plaintext, members, "alice", signKey, "")
 
 	signer, sig, body, ok := ExtractSignature(payload)
 	if !ok || signer != "alice" {
 		t.Fatalf("expected a signature by alice, got ok=%v signer=%q", ok, signer)
 	}
-	if !VerifySignature(body, sig, verifyKey) {
+	if !VerifySignature(body, sig, verifyKey, "") {
 		t.Fatal("a freshly sealed payload must verify")
 	}
 	got, rest := ExtractManifest(body)
@@ -89,15 +89,15 @@ func TestVerifySignatureRejectsTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := SealPayload([]byte("API_KEY=abc\n"), []Member{{Name: "a", Key: "k", SignKey: "s"}}, "a", signKey)
+	payload := SealPayload([]byte("API_KEY=abc\n"), []Member{{Name: "a", Key: "k", SignKey: "s"}}, "a", signKey, "")
 	_, sig, body, _ := ExtractSignature(payload)
 
 	tampered := bytes.Replace(body, []byte("abc"), []byte("abd"), 1)
-	if VerifySignature(tampered, sig, verifyKey) {
+	if VerifySignature(tampered, sig, verifyKey, "") {
 		t.Fatal("a tampered env value must not verify")
 	}
 	tampered = bytes.Replace(body, []byte("#shenv:member a k s"), []byte("#shenv:member a k x"), 1)
-	if VerifySignature(tampered, sig, verifyKey) {
+	if VerifySignature(tampered, sig, verifyKey, "") {
 		t.Fatal("a tampered manifest must not verify")
 	}
 
@@ -106,7 +106,7 @@ func TestVerifySignatureRejectsTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if VerifySignature(body, sig, otherVerify) {
+	if VerifySignature(body, sig, otherVerify, "") {
 		t.Fatal("a foreign verify key must not accept the signature")
 	}
 }
@@ -121,5 +121,34 @@ func TestExtractSignatureUnsignedPayload(t *testing.T) {
 	}
 	if !bytes.Equal(body, payload) {
 		t.Fatalf("unsigned payload must pass through untouched, got %q", body)
+	}
+}
+
+// TestBoundSignatureOnlyVerifiesForItsProject: the project id is part of the
+// signed bytes, so neither another project nor the unbound form may verify.
+func TestBoundSignatureOnlyVerifiesForItsProject(t *testing.T) {
+	verifyKey, signKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	members := []Member{{Name: "a", Key: "k", SignKey: "s"}}
+	payload := SealPayload([]byte("API_KEY=abc\n"), members, "a", signKey, "project-a")
+	if !IsBound(payload) {
+		t.Fatal("a payload sealed for a project must be marked bound")
+	}
+	signer, sig, body, ok := ExtractSignature(payload)
+	if !ok || signer != "a" {
+		t.Fatalf("ExtractSignature = %q, %v", signer, ok)
+	}
+	if !VerifySignature(body, sig, verifyKey, "project-a") {
+		t.Fatal("must verify for its own project")
+	}
+	for _, project := range []string{"project-b", ""} {
+		if VerifySignature(body, sig, verifyKey, project) {
+			t.Errorf("must not verify for project %q", project)
+		}
+	}
+	if IsBound(SealPayload([]byte("X=1\n"), members, "a", signKey, "")) {
+		t.Error("a payload sealed without a project must not be marked bound")
 	}
 }

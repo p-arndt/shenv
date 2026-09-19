@@ -57,6 +57,11 @@ func Init(args []string) error {
 		return err
 	}
 	fmt.Println(style.Dim("Updated .gitignore (.env stays local, env.shenv is shared)."))
+	if created, err := backend.InitProject(); err != nil {
+		return err
+	} else if created {
+		fmt.Println(style.Dim("Wrote a project id to config.shenv (commit it — sealed blobs are bound to it)."))
+	}
 	fmt.Println("\nNext: put your secrets in .env, then run `shenv seal`.")
 	fmt.Printf("Remember to commit %s so your teammates keep you included when they seal.\n", recipients.Path)
 	return nil
@@ -346,7 +351,11 @@ func sealEnv(plaintext []byte, source, selfKey string, loadID func() (*age.X2551
 		return false, nil
 	}
 
-	blob, err := crypto.EncryptBytes(recipients.SealPayload(plaintext, members, self.Name, signKey), keys)
+	project, err := backend.Project()
+	if err != nil {
+		return false, err
+	}
+	blob, err := crypto.EncryptBytes(recipients.SealPayload(plaintext, members, self.Name, signKey, project), keys)
 	if err != nil {
 		return false, err
 	}
