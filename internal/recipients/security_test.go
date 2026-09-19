@@ -97,3 +97,43 @@ func TestLoadRejectsFormatCharacterNames(t *testing.T) {
 		}
 	}
 }
+
+// TestLookalikeNamesAreRejected: a name that differs from a member's only by
+// lookalike characters is an impersonation, whichever way it gets in.
+func TestLookalikeNamesAreRejected(t *testing.T) {
+	if skeleton("\u0430lice") != skeleton("alice") || skeleton("\uff41lice") != skeleton("alice") {
+		t.Fatal("Cyrillic and fullwidth lookalikes must share a skeleton with the Latin name")
+	}
+	if skeleton("j\u00f6rg") == skeleton("jorg") {
+		t.Fatal("a genuinely different name must keep its own skeleton")
+	}
+	for _, name := range []string{"j\u00f6rg", "\u0438\u0432\u0430\u043d", "alice"} {
+		if err := validateName(name); err != nil {
+			t.Errorf("validateName(%q) = %v, want nil", name, err)
+		}
+	}
+	if err := validateName(strings.Repeat("a", maxNameLen+1)); err == nil {
+		t.Error("an over-long name must be rejected")
+	}
+}
+
+// TestLoadAndAddRejectLookalikeMembers: both doors into the member list — a
+// pulled file and `add-member` — must refuse a visual twin of an existing name.
+func TestLoadAndAddRejectLookalikeMembers(t *testing.T) {
+	inRepo(t)
+	if err := Add("alice", testKey(t), testSignKey(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add("аlice", testKey(t), testSignKey(t)); err == nil {
+		t.Fatal("add-member must refuse a lookalike of an existing member")
+	}
+
+	content := fmt.Sprintf("alice %s %s\nаlice %s %s\n",
+		testKey(t), testSignKey(t), testKey(t), testSignKey(t))
+	if err := os.WriteFile(Path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "look identical") {
+		t.Fatalf("expected a lookalike error, got %v", err)
+	}
+}

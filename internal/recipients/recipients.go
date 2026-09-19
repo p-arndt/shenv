@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"filippo.io/age"
 
@@ -36,6 +37,7 @@ func Load() ([]Member, error) {
 	}
 	var members []Member
 	seen := map[string]bool{}
+	seenLook := map[string]string{} // skeleton → member name
 	seenKey := map[string]string{}  // age key → member name
 	seenSign := map[string]string{} // sign key → member name
 	for line := range strings.SplitSeq(string(data), "\n") {
@@ -69,6 +71,13 @@ func Load() ([]Member, error) {
 			return nil, fmt.Errorf("duplicate member %q in %s — names must be unique so signatures can't be verified against the wrong key", fields[0], Path)
 		}
 		seen[fields[0]] = true
+		// Exact-string uniqueness is not enough for a name people read: "аlice"
+		// with a Cyrillic а is a different string and the same word on screen, so
+		// "signed by аlice" would pass for the real member.
+		if other, dup := seenLook[skeleton(fields[0])]; dup {
+			return nil, fmt.Errorf("members %q and %q in %s look identical — one of them uses lookalike characters from another script; remove the impostor", other, fields[0], Path)
+		}
+		seenLook[skeleton(fields[0])] = fields[0]
 		// Keys must be one-to-one with names as well: signature attribution maps
 		// name → sign key, and push identifies "you" by age key. An entry reusing
 		// another member's keys would make "signed by <name>" ambiguous.
@@ -140,6 +149,9 @@ func Add(name, key, signKey string) error {
 	// Never persist a list the next Load would reject (a sign key colliding with
 	// a different member's would brick the file until hand-edited).
 	for _, m := range members {
+		if m.Name != name && skeleton(m.Name) == skeleton(name) {
+			return fmt.Errorf("name %q looks identical to existing member %q — pick a name that can be told apart", name, m.Name)
+		}
 		if m.Name != name && m.SignKey == signKey {
 			return fmt.Errorf("signing key already belongs to %q — each member needs their own keys", m.Name)
 		}
@@ -177,6 +189,9 @@ func validateName(name string) error {
 	if name == "" {
 		return fmt.Errorf("member name must not be empty")
 	}
+	if utf8.RuneCountInString(name) > maxNameLen {
+		return fmt.Errorf("member name must not be longer than %d characters", maxNameLen)
+	}
 	if strings.HasPrefix(name, "#") {
 		return fmt.Errorf("member name %q must not start with '#'", name)
 	}
@@ -188,6 +203,40 @@ func validateName(name string) error {
 		}
 	}
 	return nil
+}
+
+// maxNameLen bounds member names: they are printed in every prompt, and nothing
+// legitimate needs a name that scrolls the prompt off the screen.
+const maxNameLen = 64
+
+// lookalikes maps Cyrillic and Greek letters that render like a Latin letter
+// to that letter. It is deliberately small — the letters that are
+// indistinguishable in common terminal fonts — not a full Unicode confusables
+// table, which the standard library does not carry.
+var lookalikes = map[rune]rune{
+	'а': 'a', 'с': 'c', 'ԁ': 'd', 'е': 'e', 'һ': 'h', 'і': 'i', 'ј': 'j', 'к': 'k',
+	'о': 'o', 'р': 'p', 'ԛ': 'q', 'ѕ': 's', 'ԝ': 'w', 'х': 'x', 'у': 'y',
+	'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'І': 'I', 'Ј': 'J', 'К': 'K',
+	'М': 'M', 'О': 'O', 'Р': 'P', 'Ѕ': 'S', 'Т': 'T', 'Х': 'X', 'У': 'Y',
+	'α': 'a', 'ο': 'o', 'ν': 'v', 'ρ': 'p', 'ι': 'i', 'κ': 'k',
+	'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Ι': 'I', 'Κ': 'K', 'Μ': 'M',
+	'Ν': 'N', 'Ο': 'O', 'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+}
+
+// skeleton reduces a name to what it looks like, so two names that differ only
+// in lookalike characters compare equal. Fullwidth forms fold to ASCII for the
+// same reason. Genuinely different names — including non-Latin ones — keep
+// distinct skeletons, so no script is forbidden; only impersonation is.
+func skeleton(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 0xFF01 && r <= 0xFF5E {
+			return r - 0xFEE0
+		}
+		if l, ok := lookalikes[r]; ok {
+			return l
+		}
+		return r
+	}, name)
 }
 
 // Keys parses every member into an age.Recipient for encryption.
