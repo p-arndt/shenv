@@ -1,0 +1,1 @@
+Sealed files are now tied to their project. `shenv init` writes a random `project` id to config.shenv (commit it), and an env.shenv that a teammate sealed for a different repo is rejected here. Existing repos keep working unchanged. To bind one: `shenv open`, add a `project = <name>` line to config.shenv, `shenv seal`, commit. After that everyone on the team needs this version.

@@ -1,0 +1,1 @@
+Error messages never quote your secrets anymore. A malformed line in .env or a broken key file used to be printed in full, which could put a secret into your terminal history or CI log. You now get the line number and what is wrong.

@@ -1,0 +1,1 @@
+Exec backends: your `get` command must exit 0 with empty output when nothing is stored yet. Any failing `get` now stops `seal`. If your command fails on a missing object (like `aws s3 cp`), the very first seal needs a `get` that handles that case. Repos that already have a sealed file are not affected.

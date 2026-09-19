@@ -1,0 +1,1 @@
+`shenv open` no longer writes your decrypted .env anywhere git could commit it. It now asks git whether the file is really ignored and untracked first, so a negated ignore rule, a nested .gitignore or an absolute path back into the repo can't sneak secrets into a commit.
