@@ -1,6 +1,8 @@
 name: Build and Publish Release
+# Default for anything added later; the one job that publishes raises this to
+# `contents: write` for itself.
 permissions:
-  contents: write
+  contents: read
 
 # Two release runs uploading assets to the same tag would race; queue them
 # instead (never cancel — a half-cancelled release could leave a tag with
@@ -36,46 +38,67 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # Creating the release needs write; nothing else here does.
+    permissions:
+      contents: write
+
+    # RELEASE_SIGNING_KEY is an online secret: repository code (`go run`) runs in
+    # the same job that can read it, so whoever can trigger this workflow can use
+    # the key. The environment is where that is gated — configure required
+    # reviewers and a tag/branch deployment rule on it in the repository settings;
+    # naming it here is what makes those rules apply.
+    environment: release
+
     # Third-party actions are pinned to full commit SHAs, not tags: tags are
     # mutable, and this workflow holds RELEASE_SIGNING_KEY — the key the whole
     # updater trust model reduces to. A repointed tag on any action here (the
-    # toolchain setup especially, since `go run` executes under it while the
-    # key is in the env) could exfiltrate it and forge releases every shipped
-    # updater would accept.
+    # toolchain setup especially, since the signer is compiled by it) could
+    # exfiltrate the key and forge releases every shipped updater would accept.
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
+          # This job never pushes, and it runs with the signing key in reach —
+          # don't leave a writable token in .git/config for the steps that do.
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # Reads the Go version straight from go.mod so it never drifts.
+          # Reads the pinned patch release from go.mod's toolchain directive, so
+          # the stdlib compiled into published binaries is the reviewed one.
           go-version-file: go.mod
+          # The runner image's Go can lag behind that pin; resolve upstream
+          # rather than publishing binaries built by a stale cached toolchain.
+          check-latest: true
           cache: true
 
       - name: Determine version
         id: version
         shell: bash
-        # The version input reaches this script through env, never inline
-        # ${{ }} interpolation into the script body — interpolated input is
-        # how GitHub Actions script injection happens.
+        # Every ${{ }} value reaches this script through env, never inline
+        # interpolation into the script body — interpolated input is how GitHub
+        # Actions script injection happens.
         env:
           INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             VERSION="$INPUT_VERSION"
             if [ -z "$VERSION" ]; then
               # No version given: derive one from the VERSION file, suffixed with
               # the semver pre-release identifier "-pre.<run number>" so each
               # manual run gets its own, ever-incrementing version.
-              VERSION="$(cat VERSION)-pre.${{ github.run_number }}"
+              VERSION="$(cat VERSION)-pre.${RUN_NUMBER}"
             fi
             VERSION="${VERSION#v}"
-            PRERELEASE="${{ inputs.prerelease }}"
-            DRAFT="${{ inputs.draft }}"
+            PRERELEASE="$INPUT_PRERELEASE"
+            DRAFT="$INPUT_DRAFT"
           else
             # Tag push: v0.2.0 -> 0.2.0.
             VERSION="${GITHUB_REF_NAME#v}"
@@ -105,6 +128,13 @@ jobs:
           set -euo pipefail
           go vet ./...
           go test ./...
+
+      - name: Vulnerability scan
+        # A release gate, deliberately ahead of the signing step: a known-
+        # vulnerable stdlib or dependency must not get a signature every shipped
+        # updater will accept. Pinned by version rather than added as an action
+        # — this workflow holds the signing key and pins everything it executes.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
       - name: Build static binaries (all platforms)
         # CGO_ENABLED=0 links no libc -> every binary is fully static and
@@ -143,12 +173,22 @@ jobs:
           (cd dist && sha256sum shenv_*.* > "shenv_${VERSION}_checksums.txt")
           ls -l dist
 
+      - name: Build the release signer
+        # Compiled here, before the secret is in scope: `go run` would download
+        # modules and invoke the whole toolchain with RELEASE_SIGNING_KEY in the
+        # environment. Only the finished binary needs to see the key.
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -o bin/release-sign ./cmd/release-sign
+
       - name: Sign checksums
         # `shenv update` refuses unsigned releases, so a release without this
         # signature would strand every shipped updater — fail loudly instead of
-        # publishing one. The private key exists only in this secret (and the
-        # maintainer's offline backup); the matching public key is embedded in
-        # the binary via internal/update/sign.go.
+        # publishing one. The key lives in this secret (and the maintainer's
+        # offline backup); the matching public key is embedded in the binary via
+        # internal/update/sign.go. The secret is declared on this step alone so
+        # no other step in the job can read it.
         shell: bash
         env:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
@@ -160,13 +200,20 @@ jobs:
             echo "Generate one with: go run ./cmd/release-sign gen <keyfile>, then gh secret set RELEASE_SIGNING_KEY < <keyfile>" >&2
             exit 1
           fi
-          go run ./cmd/release-sign sign "dist/shenv_${VERSION}_checksums.txt"
-          # Round-trip: verify the fresh signature against the public key
-          # embedded in this commit's internal/update — the exact check every
-          # shipped updater runs. If the secret and the embedded key have
-          # drifted apart, fail the release now instead of publishing assets
-          # that no updater will accept.
-          go run ./cmd/release-sign selfcheck "dist/shenv_${VERSION}_checksums.txt"
+          ./bin/release-sign sign "dist/shenv_${VERSION}_checksums.txt"
+
+      - name: Verify the signature against the embedded key
+        # Round-trip against the public key embedded in this commit's
+        # internal/update — the exact check every shipped updater runs. If the
+        # secret and the embedded key have drifted apart, fail the release now
+        # instead of publishing assets no updater will accept. Verification is a
+        # public-key operation, so this step runs without the secret.
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          ./bin/release-sign selfcheck "dist/shenv_${VERSION}_checksums.txt"
 
       - name: Generate changelog
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
@@ -181,9 +228,12 @@ jobs:
 
       - name: Assemble release notes
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+          PRERELEASE: ${{ steps.version.outputs.PRERELEASE }}
         run: |
-          CUR="${{ steps.version.outputs.TAG }}"
-          if [ "${{ steps.version.outputs.PRERELEASE }}" = "true" ]; then
+          CUR="$TAG"
+          if [ "$PRERELEASE" = "true" ]; then
             echo "## 🧪 Pre-release $CUR" > RELEASE_NOTES.md
           else
             echo "## 🚀 Release $CUR" > RELEASE_NOTES.md

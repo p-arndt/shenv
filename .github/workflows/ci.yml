@@ -26,11 +26,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes, so the checkout token has no business staying
+          # in .git/config where any later step (or test) could read it.
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
+          # Reads the pinned patch release from go.mod's toolchain directive, so
+          # the compiler that builds and tests here is the one the release uses.
           go-version-file: go.mod
+          # The runner's preinstalled Go can lag behind the pinned patch; resolve
+          # against upstream instead of silently accepting a stale tool cache.
+          check-latest: true
           cache: true
 
       - name: Vet
@@ -41,3 +50,9 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Vulnerability scan
+        # Run per matrix OS: the stdlib is compiled in, so symbol reachability
+        # differs per platform. Pinned by version rather than added as an action
+        # — this repo pins everything it executes.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...

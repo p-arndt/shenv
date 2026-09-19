@@ -55,7 +55,14 @@ fmt:
 fmt-check:
     @if (gofmt -l .) { Write-Error "unformatted files (run: just fmt)"; exit 1 }
 
-# Run every check the way CI should.
+# Scan dependencies and the compiled-in stdlib for known advisories, pinned to
+# the same govulncheck version CI gates on. Downloads the scanner on first run.
+vuln:
+    go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+# Run every check the way CI should. `vuln` is deliberately not in here: it needs
+# the network and the vuln database, so it would turn `just ci` into something
+# that fails on a plane. CI runs it as its own step.
 ci: fmt-check vet test
 
 # ---------------------------------------------------------------------------

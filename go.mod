@@ -2,6 +2,11 @@ module shenv
 
 go 1.26
 
+// Pinned to a patched 1.26.x: the stdlib is compiled into the shipped binaries,
+// so the toolchain that builds a release — not just the `go` directive — decides
+// which advisories users carry. CI reads this line via go-version-file.
+toolchain go1.26.8
+
 require (
 	filippo.io/age v1.3.1
 	github.com/zalando/go-keyring v0.2.8
