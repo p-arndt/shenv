@@ -4,9 +4,11 @@
 //
 //	release-sign gen <keyfile>    Generate the release keypair. The private key
 //	                              (a base64 Ed25519 seed) is written to keyfile
-//	                              with mode 0600 and never printed; the public
-//	                              key — the half embedded in internal/update —
-//	                              goes to stdout. Put the keyfile's content in
+//	                              owner-only and never printed; the public key —
+//	                              the half embedded in internal/update — goes to
+//	                              stdout. Point keyfile at a private directory
+//	                              outside the checkout so no staging command can
+//	                              ever pick it up. Put the keyfile's content in
 //	                              the RELEASE_SIGNING_KEY GitHub Actions secret,
 //	                              back it up somewhere offline, and never commit it.
 //	release-sign sign <file>      Sign file with the key from the
@@ -30,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"shenv/internal/identity"
 	"shenv/internal/update"
 )
 
@@ -73,17 +76,48 @@ func run(args []string) error {
 // gen creates the keypair. Refusing to overwrite an existing keyfile guards the
 // one copy of a key whose loss would strand every shipped binary's updater.
 func gen(keyfile string) error {
-	if _, err := os.Lstat(keyfile); err == nil {
-		return fmt.Errorf("%s already exists — refusing to overwrite a release key (rotating it strands binaries that embed the old public key)", keyfile)
-	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
 	}
-	seed := base64.RawStdEncoding.EncodeToString(priv.Seed())
-	if err := os.WriteFile(keyfile, []byte(seed+"\n"), 0o600); err != nil {
+
+	// O_EXCL makes create-if-absent atomic: no Lstat/write race, and it refuses
+	// to follow a symlink planted at the key path. 0o600 covers Unix; Windows
+	// ignores the mode bits, so SecureFile enforces the ACL below.
+	f, err := os.OpenFile(keyfile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%s already exists — refusing to overwrite a release key (rotating it strands binaries that embed the old public key)", keyfile)
+		}
 		return err
 	}
+	// Lock the still-empty file down before the seed touches disk: on Windows a
+	// fresh file starts with the directory's inherited ACL, so writing first
+	// would briefly expose the seed to whoever that ACL admits.
+	if err := identity.SecureFile(keyfile); err != nil {
+		f.Close()
+		os.Remove(keyfile)
+		return fmt.Errorf("securing %s: %w", keyfile, err)
+	}
+	seed := base64.RawStdEncoding.EncodeToString(priv.Seed())
+	if _, err := f.Write([]byte(seed + "\n")); err != nil {
+		f.Close()
+		os.Remove(keyfile)
+		return err
+	}
+	// The seed is unrecoverable once this process exits, so flush it to stable
+	// storage before reporting success — a half-written file after a crash would
+	// leave a public key embedded in binaries that nothing can sign for.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(keyfile)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(keyfile)
+		return err
+	}
+
 	fmt.Printf("public key (add to releaseVerifyKeys in internal/update/sign.go):\n  %s\n\n", base64.RawStdEncoding.EncodeToString(pub))
 	fmt.Printf("private key written to %s — NOT printed.\n", keyfile)
 	fmt.Println("Next:")

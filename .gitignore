@@ -7,8 +7,13 @@
 *.test
 *.out
 
-# The release signing key must never land in the repo, wherever it was generated
+# The release signing key must never land in the repo, wherever it was generated.
+# docs/release-signing.md keeps it outside the checkout entirely; these patterns
+# are the backstop for a stray copy, and cover every name that runbook has ever
+# used (release.key, release-new.key, release-signing-key*).
 release-signing-key*
+release*.key
+*.key
 
 # shenv
 .env
