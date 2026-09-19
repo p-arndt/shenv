@@ -47,7 +47,7 @@ First dev in a repo:
 ```sh
 shenv init bob            # register in this repo (creates your keypair on first use)
 # ...put secrets in .env...
-shenv seal                # .env → env.shenv, then commit env.shenv + recipients.shenv
+shenv seal                # .env → env.shenv, then commit env.shenv + recipients.shenv + config.shenv
 ```
 
 > Run `shenv init` **inside the repo** — it registers you in *this* repo's
@@ -190,7 +190,9 @@ The private key in `~/.shenv/key.txt` decrypts every secret you have access to, 
 
 - **File permissions (always).** On Unix the key is `0600`; on Windows an explicit
   owner-only ACL is applied (the Unix bits are ignored there), so no other local
-  user can read it.
+  user can read it. A key that arrives with looser permissions — restored from a
+  backup, copied from another machine — is refused until you `chmod 600` it, and
+  a symlink at that path is never followed.
 - **Passphrase (optional).** `shenv init` offers to encrypt the key at rest with a
   passphrase (age/scrypt). If set, `open` prompts for it; `whoami` still works
   without it, since the public key is kept as a plaintext comment.
@@ -220,16 +222,31 @@ shenv assumes a small, mutually trusted team. A few highlights:
 - **Every blob is signed.** `seal` signs the payload (Ed25519, sign-then-encrypt);
   `open`/`run` reject anything not signed by a current member and tell you who sealed
   it — so a hijacked bucket or gist can't plant a replacement `env.shenv`.
+- **Blobs are bound to their project.** `init` writes a random `project` id to
+  `config.shenv`, and it is part of what gets signed — a blob a teammate sealed
+  for *another* repo is rejected here, even though their signature is genuine.
+  Older repos keep working without one; see
+  [docs/security.md](docs/security.md#blobs-are-bound-to-their-project) to bind them.
 - **No accidental lockouts.** Each blob embeds the member list it was encrypted for;
   `seal` refuses to ship one that would drop a current member — or yourself — from access.
 - **Recipient changes are surfaced.** `recipients.shenv` rides the same untrusted
-  channel as the ciphertext, so `seal` shows added/removed keys and asks you to confirm
-  before encrypting for a changed set.
+  channel as the ciphertext, so shenv pins the member list your machine last
+  accepted: `seal` asks before encrypting for a changed set, and `open`/`run`/`edit`
+  ask before verifying a blob against one. Names that only differ by lookalike
+  characters are rejected. (CI: a fresh machine trusts the list as cloned;
+  `SHENV_TRUST_RECIPIENTS=1` accepts a change without a prompt.)
+- **Plaintext stays out of git.** `open` only writes once git itself confirms the
+  destination is ignored and untracked — a negated rule, a nested `.gitignore` or
+  an absolute path back into the repo is refused — and the file is created
+  owner-only from its first byte. Errors never quote decrypted content.
+- **Storage failures fail closed.** If the current blob can't be read, `seal` and
+  `edit` stop instead of overwriting it blind; writes are atomic, so a failed one
+  leaves the previous blob intact.
 - **Your private key is protected in layers** — file permissions, an optional
   passphrase, and an optional OS-keychain cache. See
   [Protecting your private key](#protecting-your-private-key).
 
-Full threat model — what signing does and doesn't cover, replays, and `run`'s
+Full threat model — what signing and pinning do and don't cover, replays, and `run`'s
 process-environment exposure — is in [docs/security.md](docs/security.md).
 
 > The security design was reviewed by Claude (Fable 5) 🤖 — a sanity check, not a
