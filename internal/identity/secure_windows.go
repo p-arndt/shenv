@@ -2,7 +2,11 @@
 
 package identity
 
-import "golang.org/x/sys/windows"
+import (
+	"os"
+
+	"golang.org/x/sys/windows"
+)
 
 // SecureFile locks down a secret-holding file (the key file, edit's transient
 // plaintext) so only the current user can read it.
@@ -11,6 +15,17 @@ import "golang.org/x/sys/windows"
 // plain 0600 does NOT keep other local users out. We instead set an explicit
 // DACL granting full control to the current user's SID only, and mark it
 // PROTECTED so inherited ACEs from the parent directory are stripped.
+// checkKeyPermissions has nothing to compare on Windows: the Unix mode bits the
+// file reports are synthesised and say nothing about who may read it — the DACL
+// does. So instead of refusing the key, re-assert the owner-only DACL, which a
+// hand-copied or restored key file will not carry. Best effort: a key we cannot
+// re-secure (another owner, a network share) is still usable, and failing here
+// would lock the user out of their own secrets.
+func checkKeyPermissions(path string, _ os.FileInfo) error {
+	_ = SecureFile(path)
+	return nil
+}
+
 func SecureFile(path string) error {
 	token := windows.GetCurrentProcessToken()
 	tokenUser, err := token.GetTokenUser()

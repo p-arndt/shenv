@@ -28,13 +28,17 @@ func Parse(data []byte) (map[string]string, error) {
 			line = strings.TrimSpace(rest)
 		}
 
+		// Errors carry the line number and a category only. The input here is
+		// decrypted secret material — a continuation line of a multiline key is
+		// indistinguishable from a typo — and callers print errors to stderr,
+		// where terminal recordings and CI logs would keep it.
 		key, rawVal, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("line %d: missing '=' in %q", lineNo, raw)
+			return nil, fmt.Errorf("line %d: missing '='", lineNo)
 		}
 		key = strings.TrimSpace(key)
 		if key == "" || strings.ContainsAny(key, " \t") {
-			return nil, fmt.Errorf("line %d: invalid variable name %q", lineNo, key)
+			return nil, fmt.Errorf("line %d: invalid variable name", lineNo)
 		}
 
 		out[key] = parseValue(strings.TrimSpace(rawVal))

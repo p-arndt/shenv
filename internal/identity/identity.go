@@ -6,6 +6,7 @@ package identity
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,48 @@ func Path() (string, error) {
 	return filepath.Join(home, ".shenv", "key.txt"), nil
 }
 
+// readKeyFile returns the contents of the key file after checking that it is
+// something we are willing to treat as a private key: a real file, not a link to
+// one somewhere else, and not exposed to other local users. Creation protects
+// the key, but a key copied from a backup or another machine arrives with
+// whatever the source gave it, and that state persists for the key's whole life.
+func readKeyFile(path string) ([]byte, error) {
+	// Lstat before opening: Open follows symlinks, and the mode that matters
+	// would then be the link target's, wherever that lives.
+	link, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if link.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("key file %s is a symlink — shenv will not follow it; move the key to that path instead", path)
+	}
+	// Checked here as well as on the handle below: opening a fifo planted at the
+	// key path would block until someone writes to it.
+	if !link.Mode().IsRegular() {
+		return nil, fmt.Errorf("key file %s is not a regular file", path)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	// Stat the open handle, not the path again: a swap between the two checks
+	// would otherwise decide the mode of a file we never read.
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("key file %s is not a regular file", path)
+	}
+	if err := checkKeyPermissions(path, info); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(f)
+}
+
 // Load reads the user's private key. If it is passphrase-encrypted, ask is
 // invoked to obtain the passphrase (and must not be nil in that case).
 func Load(ask PassphraseFunc) (*age.X25519Identity, error) {
@@ -45,13 +88,16 @@ func Load(ask PassphraseFunc) (*age.X25519Identity, error) {
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readKeyFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no identity found — run `shenv init` first")
 		}
 		return nil, err
 	}
+	// The whole file is secret when the key is plaintext, and the armored blob is
+	// the ciphertext otherwise — keep neither around longer than the parse.
+	defer crypto.Zero(data)
 
 	if isEncrypted(data) {
 		if ask == nil {
@@ -70,7 +116,13 @@ func Load(ask PassphraseFunc) (*age.X25519Identity, error) {
 		// be wiped — age's API is string-only — so zeroing plain only shrinks the
 		// exposure, it doesn't erase every copy of the decrypted key.
 		defer crypto.Zero(plain)
-		return age.ParseX25519Identity(strings.TrimSpace(string(plain)))
+		id, err := age.ParseX25519Identity(strings.TrimSpace(string(plain)))
+		if err != nil {
+			// age quotes parts of the rejected key in its error, and this one just
+			// came out of the decryption — it must not reach stderr.
+			return nil, fmt.Errorf("decrypted key is not a valid age secret key")
+		}
+		return id, nil
 	}
 
 	return parsePlaintextKey(data)
@@ -83,13 +135,14 @@ func PublicKey() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readKeyFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("no identity found — run `shenv init` first")
 		}
 		return "", err
 	}
+	defer crypto.Zero(data)
 
 	if isEncrypted(data) {
 		for line := range strings.SplitSeq(string(data), "\n") {
@@ -118,13 +171,14 @@ func VerifyKey(ask PassphraseFunc) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readKeyFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("no identity found — run `shenv init` first")
 		}
 		return "", err
 	}
+	defer crypto.Zero(data)
 
 	if !isEncrypted(data) {
 		id, err := parsePlaintextKey(data)
@@ -162,6 +216,9 @@ func deriveVerifyKey(id *age.X25519Identity) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Only the public half leaves this function, so the private key it was
+	// derived from has no reason to stay in memory.
+	defer crypto.Zero(key)
 	return crypto.VerifyKeyString(key), nil
 }
 
@@ -196,6 +253,8 @@ func Create(passphrase string) (*age.X25519Identity, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Without a passphrase this buffer holds the raw secret key.
+	defer crypto.Zero(content)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
@@ -262,7 +321,12 @@ func parsePlaintextKey(data []byte) (*age.X25519Identity, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		return age.ParseX25519Identity(line)
+		id, err := age.ParseX25519Identity(line)
+		if err != nil {
+			// The line is the secret itself; age's error quotes pieces of it.
+			return nil, fmt.Errorf("key file does not contain a valid age secret key")
+		}
+		return id, nil
 	}
 	return nil, fmt.Errorf("key file contains no key")
 }
@@ -273,13 +337,14 @@ func IsEncrypted() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readKeyFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, fmt.Errorf("no identity found — run `shenv init` first")
 		}
 		return false, err
 	}
+	defer crypto.Zero(data)
 	return isEncrypted(data), nil
 }
 

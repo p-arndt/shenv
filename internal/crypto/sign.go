@@ -25,10 +25,15 @@ const signKeyInfo = "shenv signing key v1"
 
 // DeriveSigningKey returns the Ed25519 signing key for an age identity.
 func DeriveSigningKey(id *age.X25519Identity) (ed25519.PrivateKey, error) {
-	seed, err := hkdf.Key(sha256.New, []byte(id.String()), nil, signKeyInfo, ed25519.SeedSize)
+	secret := []byte(id.String())
+	// The age secret and the HKDF output are each as good as the signing key; the
+	// returned key is the only copy a caller needs.
+	defer Zero(secret)
+	seed, err := hkdf.Key(sha256.New, secret, nil, signKeyInfo, ed25519.SeedSize)
 	if err != nil {
 		return nil, err
 	}
+	defer Zero(seed)
 	return ed25519.NewKeyFromSeed(seed), nil
 }
 
