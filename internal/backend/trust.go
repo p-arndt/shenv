@@ -45,6 +45,9 @@ func EnsureTrusted(b Backend, confirm ExecConfirmFunc) error {
 	}
 
 	if os.Getenv("SHENV_ALLOW_EXEC") == "1" {
+		// The bypass skips the prompt, not the record: without this line a repo's
+		// commands would run with no trace in the terminal or the CI log.
+		fmt.Fprintf(os.Stderr, "shenv: SHENV_ALLOW_EXEC=1 — running unapproved exec backend commands from %s\n", configPath)
 		return nil
 	}
 

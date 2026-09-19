@@ -36,6 +36,13 @@ func TestHelperEditor(t *testing.T) {
 		}
 		f.Close()
 	}
+	// SHENV_EDITOR_REMOVE simulates storage going away (or denying reads) while
+	// the editor is open: the named file (the blob) disappears mid-edit.
+	if remove := os.Getenv("SHENV_EDITOR_REMOVE"); remove != "" {
+		if err := os.Remove(remove); err != nil {
+			os.Exit(7)
+		}
+	}
 	switch os.Getenv("SHENV_EDITOR_MODE") {
 	case "append":
 		data, err := os.ReadFile(file)
@@ -65,6 +72,7 @@ func fakeEditor(t *testing.T, mode string) string {
 	t.Setenv("SHENV_EDITOR_MODE", mode)
 	t.Setenv("SHENV_EDITOR_LOG", log)
 	t.Setenv("SHENV_EDITOR_TOUCH", "")
+	t.Setenv("SHENV_EDITOR_REMOVE", "")
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", os.Args[0]+" -test.run=TestHelperEditor --")
 	return log
@@ -402,5 +410,28 @@ func TestEditRequiresBlob(t *testing.T) {
 	err := Edit(nil)
 	if err == nil || !strings.Contains(err.Error(), "nothing to edit") {
 		t.Fatalf("expected a nothing-to-edit error, got %v", err)
+	}
+}
+
+// TestEditAbortsWhenRefetchFails: without the current blob there is nothing to
+// compare the edit against, so sealing could silently discard a teammate's
+// update. A blob that vanished since the edit started is suspicious in itself.
+func TestEditAbortsWhenRefetchFails(t *testing.T) {
+	setup(t)
+	mustInit(t)
+	mustSeal(t, "X=1\n")
+	fakeEditor(t, "append")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHENV_EDITOR_REMOVE", filepath.Join(cwd, "env.shenv"))
+	feed(t, "y\n") // any prompt would be a bug — this must not be confirmable
+
+	if err := Edit(nil); err == nil {
+		t.Fatal("edit must fail when the blob cannot be re-read")
+	}
+	if _, err := os.Stat("env.shenv"); err == nil {
+		t.Fatal("a failed re-fetch must not seal a new blob")
 	}
 }

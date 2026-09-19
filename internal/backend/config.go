@@ -31,9 +31,11 @@ func readConfig(path string) (map[string]string, error) {
 		// The config ships with the clone, and exec commands from it are shown in
 		// the trust prompt before running. An embedded terminal escape (ESC is not
 		// whitespace, so TrimSpace keeps it) could redraw that prompt to hide what
-		// is being approved. No key or single-line command needs control characters.
-		if i := strings.IndexFunc(line, func(r rune) bool { return r != '\t' && unicode.IsControl(r) }); i >= 0 {
-			return nil, fmt.Errorf("%s line %d: control character in %q", path, lineNo, raw)
+		// is being approved, and bidi or zero-width format runes could reorder or
+		// hide part of the command the same way. No key or single-line command
+		// needs either.
+		if i := strings.IndexFunc(line, func(r rune) bool { return r != '\t' && !unicode.IsGraphic(r) }); i >= 0 {
+			return nil, fmt.Errorf("%s line %d: control character or invisible rune in %q", path, lineNo, raw)
 		}
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {

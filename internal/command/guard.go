@@ -3,6 +3,7 @@ package command
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,8 +84,15 @@ func pushedRecipientsPath() (string, error) {
 // its manifest can't be trusted, so the lockout comparison is skipped.
 func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Identity) (bool, error) {
 	prevBlob, err := store.Get()
-	if err != nil {
+	if errors.Is(err, backend.ErrNotFound) {
 		return true, nil // no existing blob — first seal, nothing to guard
+	}
+	if err != nil {
+		// A denied, failed, or oversized read is not an absent blob: a backend can
+		// refuse reads and still accept writes, and proceeding would overwrite a
+		// blob whose members were never compared — the exact silent lockout this
+		// guard exists to prevent.
+		return false, fmt.Errorf("cannot read the existing blob from %s, so the lockout check cannot run (an exec `get` must exit 0 with empty output when nothing is stored yet): %w", store, err)
 	}
 
 	payload, err := crypto.DecryptBytes(prevBlob, id)
@@ -136,7 +144,7 @@ func confirmNoLockout(store backend.Backend, cur []recipients.Member, id age.Ide
 		return true, nil
 	}
 
-	fmt.Println(style.Danger("These members can decrypt the current env.shenv but are MISSING from "+recipients.Path+":"))
+	fmt.Println(style.Danger("These members can decrypt the current env.shenv but are MISSING from " + recipients.Path + ":"))
 	for _, m := range dropped {
 		fmt.Printf("    %s %s  %s\n", style.Danger("-"), sanitizeTerm(m.Name), sanitizeTerm(m.Key))
 	}
@@ -207,13 +215,15 @@ func confirmRecipients(members []recipients.Member, selfKey string) (bool, error
 	return askYesNo("Continue?"), nil
 }
 
-// sanitizeTerm strips control characters from strings that reach the terminal.
+// sanitizeTerm strips non-graphic runes from strings that reach the terminal.
 // The dropped-member list comes from a decrypted manifest — signed, but possibly
 // by a malicious member — and a name or key carrying ANSI escape bytes could
 // otherwise rewrite the very prompt that is supposed to expose the tampering.
+// Format runes (bidi overrides, zero-width characters) are not control
+// characters but reorder or hide what is displayed just the same.
 func sanitizeTerm(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if !unicode.IsGraphic(r) {
 			return -1
 		}
 		return r
@@ -236,7 +246,10 @@ func rememberRecipients(members []recipients.Member) error {
 		lines = append(lines, k)
 	}
 	sort.Strings(lines)
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
+	// Written atomically: a half-written set would look like a recipient change on
+	// the next seal — or, worse, hide one — and this file is the only record of
+	// what this machine last sealed for.
+	return backend.WriteFileAtomic(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600)
 }
 
 // loadPushedRecipients reads the recipient set from the last seal. The second

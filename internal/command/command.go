@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -175,6 +174,7 @@ func createIdentity() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
+	defer crypto.Zero(signKey)
 	pub := id.Recipient().String()
 	fmt.Printf("%s %s\n  %s\n\n", style.Good("Created identity."), style.Header("Your public key:"), pub)
 	if passphrase != "" {
@@ -250,9 +250,21 @@ func Seal(args []string) error {
 		return fmt.Errorf("%w (sealing would share the target file's contents with every recipient)", err)
 	}
 
-	plaintext, err := os.ReadFile(in)
+	// Read through the backend's blob limit instead of slurping the whole file:
+	// sealing an arbitrarily large .env would allocate and encrypt it only to
+	// produce a blob no backend can read back (see sealEnv).
+	f, err := os.Open(in)
 	if err != nil {
 		return err
+	}
+	plaintext, err := io.ReadAll(io.LimitReader(f, backend.MaxBlobSize+1))
+	f.Close()
+	if err != nil {
+		return err
+	}
+	if len(plaintext) > backend.MaxBlobSize {
+		crypto.Zero(plaintext)
+		return fmt.Errorf("%s exceeds the %d-byte limit — shenv is for secrets, not payloads", in, backend.MaxBlobSize)
 	}
 	// sealEnv encrypts a copy (SealPayload builds a fresh buffer), so this read
 	// of the .env plaintext is dead once it returns — zero it then. The .env file
@@ -303,6 +315,7 @@ func sealEnv(plaintext []byte, source, selfKey string, loadID func() (*age.X2551
 	if err != nil {
 		return false, err
 	}
+	defer crypto.Zero(signKey)
 	if verify := crypto.VerifyKeyString(signKey); self.SignKey != verify {
 		return false, fmt.Errorf("your signing key doesn't match your entry in %s — run `shenv init %s` to update it, then seal again", recipients.Path, self.Name)
 	}
@@ -336,6 +349,13 @@ func sealEnv(plaintext []byte, source, selfKey string, loadID func() (*age.X2551
 	blob, err := crypto.EncryptBytes(recipients.SealPayload(plaintext, members, self.Name, signKey), keys)
 	if err != nil {
 		return false, err
+	}
+	// The manifest and ASCII armor both grow the payload, so a plaintext under the
+	// limit can still armor past it. Check the finished blob before Put: storing
+	// one the backend refuses to read back would replace a readable blob with an
+	// unusable one and lock the team out of its own secrets.
+	if len(blob) > backend.MaxBlobSize {
+		return false, fmt.Errorf("the encrypted blob would be %d bytes, past the %d-byte limit — nothing was written; shrink %s", len(blob), backend.MaxBlobSize, source)
 	}
 
 	if err := store.Put(blob); err != nil {
@@ -404,92 +424,39 @@ func Open(args []string) error {
 
 	// The tool's core promise is that plaintext never lands in the repo — that
 	// must hold for `open --out .env.production` just as for the default .env.
-	if err := ensureIgnored(out); err != nil {
+	ignored, err := ensureIgnored(out)
+	if err != nil {
 		return err
 	}
 
-	if err := os.WriteFile(out, plaintext, 0o600); err != nil {
+	if err := writePlaintext(out, plaintext); err != nil {
 		return err
 	}
-	// WriteFile's mode only applies on create; if the file already existed with
-	// looser permissions, tighten them now (best-effort — a no-op on Windows,
-	// where the home/repo ACLs govern access).
-	_ = os.Chmod(out, 0o600)
-	fmt.Println(style.Good(fmt.Sprintf("Wrote %s (%d bytes).", out, len(plaintext))) + style.Dim(" Keep it local — it's gitignored."))
+	done := style.Good(fmt.Sprintf("Wrote %s (%d bytes).", out, len(plaintext)))
+	if ignored {
+		// Only claimed once git confirmed it — an unverified promise here is
+		// worse than none, since it is exactly what stops people from checking.
+		done += style.Dim(" Keep it local — it's gitignored.")
+	}
+	fmt.Println(done)
 	return nil
 }
 
 // ensureGitignore makes sure .env is ignored and env.shenv is not.
 // The "!" entry explicitly un-ignores the blob in case a broad rule hides it.
 func ensureGitignore() error {
-	_, err := appendGitignore(defaultEnvFile, "!"+backend.DefaultBlobPath)
+	_, err := appendGitignore(".gitignore", defaultEnvFile, plaintextTempPrefix+"*", "!"+backend.DefaultBlobPath)
 	return err
 }
 
-// ensureIgnored guards an open target: decrypted plaintext must never be
-// committable, so any repo-local output path is added to .gitignore before the
-// secrets are written. Paths outside the repo (absolute, `..`-escaping) can't
-// be committed from here and are left alone. Failing to update .gitignore is
-// fatal — better no plaintext than committable plaintext.
-func ensureIgnored(path string) error {
-	if !filepath.IsLocal(path) {
-		return nil
-	}
-	// .gitignore has no effect on a file git already tracks — `git commit -a`
-	// would still commit it. Without this check, `open --out env.shenv` (or any
-	// committed path) would silently turn a tracked file into plaintext secrets.
-	if isGitTracked(path) {
-		return fmt.Errorf("%s is tracked by git, so .gitignore cannot keep it out of commits — pick a different --out (or `git rm --cached -- %s` first)", path, path)
-	}
-	added, err := appendGitignore(filepath.ToSlash(path))
-	if err != nil {
-		return fmt.Errorf("could not add %s to .gitignore (refusing to write plaintext that git could commit): %w", path, err)
-	}
-	if added {
-		fmt.Printf("Added %s to .gitignore so the decrypted file can't be committed.\n", path)
-	}
-	return nil
-}
-
 // isGitTracked reports whether git tracks path. Best-effort: without git on
-// PATH or outside a work tree it reports false, leaving the .gitignore guard
-// to do what it can — the same protection level as before this check existed.
+// PATH or outside a work tree it reports false. Only good enough for reporting
+// (see status); guarding a plaintext write goes through ensureIgnored, which
+// fails closed instead.
 func isGitTracked(path string) bool {
 	cmd := exec.Command("git", "ls-files", "--error-unmatch", "--", path)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	return cmd.Run() == nil
-}
-
-// appendGitignore appends the entries not already present (as exact lines) in
-// .gitignore under a "# shenv" block, reporting whether anything was added.
-func appendGitignore(entries ...string) (bool, error) {
-	const path = ".gitignore"
-	existing, _ := os.ReadFile(path)
-	lines := map[string]bool{}
-	for line := range strings.SplitSeq(string(existing), "\n") {
-		lines[strings.TrimSpace(line)] = true
-	}
-
-	var add []string
-	for _, e := range entries {
-		if !lines[e] {
-			add = append(add, e)
-		}
-	}
-	if len(add) == 0 {
-		return false, nil
-	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-	block := "\n# shenv\n" + strings.Join(add, "\n") + "\n"
-	if _, err := f.WriteString(block); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // confirm reads a y/n answer from stdin.

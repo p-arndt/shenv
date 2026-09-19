@@ -61,7 +61,7 @@ func TestFileBackendPutRejectsSymlinkedDir(t *testing.T) {
 // TestFileBackendGetRejectsOversized guards the in-memory read cap.
 func TestFileBackendGetRejectsOversized(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "big.age")
-	if err := os.WriteFile(path, make([]byte, maxBlobSize+1), 0o644); err != nil {
+	if err := os.WriteFile(path, make([]byte, MaxBlobSize+1), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := (FileBackend{Path: path}).Get(); err == nil || !strings.Contains(err.Error(), "limit") {

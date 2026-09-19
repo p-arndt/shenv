@@ -165,7 +165,9 @@ in `config.shenv` (safe to commit — it holds no secrets):
 
 ```ini
 backend = exec
-# `get` writes the blob to stdout; `put` reads it from stdin.
+# `get` writes the blob to stdout; `put` reads it from stdin. `get` must exit 0
+# with empty stdout when nothing is stored yet, and non-zero on any failure —
+# shenv only treats the former as "first seal" and refuses to write on the latter.
 get = aws s3 cp s3://my-bucket/env.shenv -
 put = aws s3 cp - s3://my-bucket/env.shenv
 ```

@@ -155,3 +155,13 @@ func TestLoadPushedRecipientsIgnoresBlanks(t *testing.T) {
 		t.Fatalf("expected the entry to be present, got %v", set)
 	}
 }
+
+// TestSanitizeTermDropsInvisibleRunes: names from a decrypted manifest reach the
+// lockout prompt, where a bidi override or zero-width rune would make the
+// displayed member differ from the real one.
+func TestSanitizeTermDropsInvisibleRunes(t *testing.T) {
+	got := sanitizeTerm("ali\u202ece\u200b\x1b[2K b\u00f6b")
+	if want := "alice[2K b\u00f6b"; got != want {
+		t.Fatalf("sanitizeTerm = %q, want %q", got, want)
+	}
+}

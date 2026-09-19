@@ -131,6 +131,8 @@ func Run(args []string) error {
 	if err := child.Run(); err != nil {
 		// Propagate the child's own exit code so scripts and CI see it.
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
+			// os.Exit skips the deferred wipe above.
+			crypto.Zero(plaintext)
 			os.Exit(exit.ExitCode())
 		}
 		return fmt.Errorf("running %s: %w", cmdArgs[0], err)

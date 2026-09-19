@@ -202,10 +202,12 @@ func TestPullCustomOutTarget(t *testing.T) {
 }
 
 // TestPullEnsuresOutputGitignored: pull must never leave decrypted plaintext
-// where git could commit it — every repo-local output path is added to
+// where git could commit it — every output path inside the worktree is added to
 // .gitignore before the secrets are written.
 func TestPullEnsuresOutputGitignored(t *testing.T) {
+	requireGit(t)
 	setup(t)
+	gitInit(t)
 	mustInit(t)
 	writeEnv(t, "K=v\n")
 	feed(t, "y\n")
@@ -222,15 +224,8 @@ func TestPullEnsuresOutputGitignored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull must create .gitignore for a custom target: %v", err)
 	}
-	found := false
-	for _, line := range strings.Split(string(ignore), "\n") {
-		if strings.TrimSpace(line) == ".env.production" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf(".gitignore must list the pull target, got:\n%s", ignore)
+	if !gitIgnores(t, ".env.production") {
+		t.Fatalf("git must ignore the pull target, .gitignore is:\n%s", ignore)
 	}
 
 	// A second pull to the same target must not duplicate the entry.

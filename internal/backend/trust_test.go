@@ -100,7 +100,7 @@ func TestCapWriterTripsOverLimit(t *testing.T) {
 }
 
 func TestReadCappedRejectsOversized(t *testing.T) {
-	oversized := strings.NewReader(strings.Repeat("a", maxBlobSize+1))
+	oversized := strings.NewReader(strings.Repeat("a", MaxBlobSize+1))
 	if _, err := readCapped(oversized, "blob"); err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("expected size-limit error, got %v", err)
 	}

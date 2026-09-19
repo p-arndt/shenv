@@ -89,7 +89,15 @@ func Edit(args []string) error {
 	// blob fetched before it. If a teammate re-sealed meanwhile, sealing now
 	// would silently discard their update — worst case re-instating a secret
 	// they just rotated, under a perfectly valid signature. Re-fetch and ask.
-	if cur, err := store.Get(); err == nil && !bytes.Equal(cur, blob) {
+	// A failed re-fetch cannot be waved through: without the current blob there is
+	// nothing to compare against, so sealing would discard a teammate's update
+	// without the warning below. "Not found" is no better here — the blob existed
+	// minutes ago, so its disappearance is itself a reason to stop.
+	cur, err := store.Get()
+	if err != nil {
+		return fmt.Errorf("cannot re-read env.shenv to check for concurrent changes, so your edit was not sealed (it is discarded; run `shenv edit` again once storage works): %w", err)
+	}
+	if !bytes.Equal(cur, blob) {
 		fmt.Println("env.shenv changed while you were editing — someone re-sealed it, and your edit is based on the old contents.")
 		fmt.Print("Seal your edit anyway, discarding theirs? [y/N] ")
 		if !confirm() {
@@ -357,14 +365,13 @@ func refreshLocalEnv(before, after []byte) {
 		fmt.Fprintf(os.Stderr, "warning: not updating %s: %v\n", defaultEnvFile, err)
 		return
 	}
-	if err := ensureIgnored(defaultEnvFile); err != nil {
+	if _, err := ensureIgnored(defaultEnvFile); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: not updating %s: %v\n", defaultEnvFile, err)
 		return
 	}
-	if err := os.WriteFile(defaultEnvFile, after, 0o600); err != nil {
+	if err := writePlaintext(defaultEnvFile, after); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not update %s: %v — run `shenv open` to refresh it.\n", defaultEnvFile, err)
 		return
 	}
-	_ = os.Chmod(defaultEnvFile, 0o600)
 	fmt.Printf("Updated the local %s to match (it was in sync before the edit).\n", defaultEnvFile)
 }
