@@ -1,109 +1,37 @@
 # shenv — task runner
 #
-# Install `just`:  winget install Casey.Just   (or  go install github.com/casey/just@latest)
-# List recipes:    just            (or  just --list)
+# Install `just`:  winget install Casey.Just   (or  brew install just)
+# List recipes:    just
 #
-# Layout:
-#   cmd/shenv          — the `shenv` CLI entry point   (-> shenv.exe)
-#   internal/…         — crypto, backends, commands, keystore, buildinfo
-#   VERSION            — single source of truth for the version (stamped into the binary)
+# Shared recipes (build, test, fmt, ci, release, …) live in .just/, copied from
+# ~/coding/just-common. Edit them there and run `just sync-common`; this file
+# only holds what is specific to shenv.
 
-# Run recipes through PowerShell on Windows so multi-line bodies and env work.
-set windows-shell := ["pwsh.exe", "-NoLogo", "-NoProfile", "-Command"]
+import '.just/common.just'
+import '.just/go.just'
+import '.just/release.just'
 
-# ldflags shared by the release builds: stamp version metadata + strip symbols.
-_LDFLAGS := "-s -w -X shenv/internal/buildinfo.Version=$(Get-Content VERSION -Raw).Trim() -X shenv/internal/buildinfo.Commit=$(git rev-parse --short HEAD) -X shenv/internal/buildinfo.Date=$(Get-Date -AsUTC -Format o)"
+set allow-duplicate-variables
 
-# Default: show the recipe list.
-default:
-    @just --list
-
-# ---------------------------------------------------------------------------
-# Dev
-# ---------------------------------------------------------------------------
-
-# Run the CLI from source, passing through any args:  just run status
-run *ARGS:
-    go run ./cmd/shenv {{ARGS}}
-
-# Build a plain dev binary -> shenv.exe (version reports as "dev").
-build:
-    go build -o shenv.exe ./cmd/shenv
-
-# Build a stripped, statically-linked release binary for the host platform,
-# stamped with the current VERSION -> shenv.exe.
-build-release:
-    $env:CGO_ENABLED = "0"; go build -trimpath -ldflags "{{_LDFLAGS}}" -o shenv.exe ./cmd/shenv
-
-# ---------------------------------------------------------------------------
-# Quality
-# ---------------------------------------------------------------------------
-
-# Run the test suite.
-test:
-    go test ./...
-
-# Vet for suspicious constructs.
-vet:
-    go vet ./...
-
-# Format all Go code.
-fmt:
-    gofmt -w .
-
-# Verify formatting without writing changes (fails if anything is unformatted).
-fmt-check:
-    @if (gofmt -l .) { Write-Error "unformatted files (run: just fmt)"; exit 1 }
+BIN_NAME := "shenv"
+BUILDINFO_PKG := "shenv/internal/buildinfo"
+MAIN := "./cmd/shenv"
 
 # Scan dependencies and the compiled-in stdlib for known advisories, pinned to
 # the same govulncheck version CI gates on. Downloads the scanner on first run.
+# Deliberately not in `ci`: it needs the network and the vuln database, so it
+# would turn `just ci` into something that fails on a plane. CI runs it as its
+# own job.
+
+# Scan for known vulnerabilities.
 vuln:
     go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-# Run every check the way CI should. `vuln` is deliberately not in here: it needs
-# the network and the vuln database, so it would turn `just ci` into something
-# that fails on a plane. CI runs it as its own step.
-ci: fmt-check vet test
-
-# ---------------------------------------------------------------------------
-# Release
-# ---------------------------------------------------------------------------
-
-# Print the current version (read from the VERSION file).
-version:
-    @(Get-Content VERSION -Raw).Trim()
-
-# Stamp a version into the VERSION file without committing. Accepts a bump
-# keyword or an explicit version. Examples:
-#   just set-version patch        just set-version 0.2.0
-set-version BUMP="patch":
-    node scripts/set-version.mjs {{BUMP}}
-
-# Cut a release: bump the version (patch|minor|major, or an explicit x.y.z),
-# stamp VERSION, commit, tag, and push -> triggers the release workflow which
-# builds the static binaries for every platform. Examples:
-#   just release            just release minor            just release 1.0.0
-release BUMP="patch":
-    node scripts/release.mjs {{BUMP}}
-
-# ---------------------------------------------------------------------------
-# Demo
-# ---------------------------------------------------------------------------
+# Builds shenv and runs it against a throwaway team in $TMPDIR (bare remote, two
+# HOMEs, invented secrets), never your own key or repos. Needs vhs: brew install
+# vhs.  just demo --keep  keeps the throwaway world for inspection.
 
 # Re-record the README demo GIF -> assets/demo.gif.
-# Builds shenv and runs it against a throwaway team in $TMPDIR (bare remote, two
-# HOMEs, invented secrets) — never your own key or repos. Needs vhs: brew install vhs.
-#   just demo               record
-#   just demo --keep        keep the throwaway world for inspection
 [unix]
 demo *ARGS:
     bash scripts/demo.sh {{ARGS}}
-
-# ---------------------------------------------------------------------------
-# Housekeeping
-# ---------------------------------------------------------------------------
-
-# Remove build artifacts.
-clean:
-    -Remove-Item -Force shenv.exe -ErrorAction SilentlyContinue
-    -Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
