@@ -77,31 +77,28 @@ closed** — the update is refused, never installed unverified.
 ## Protecting the signing job
 
 The signing key is only as protected as the pipeline that reads it, and that
-pipeline is online. `.github/workflows/release.yml` does what a workflow file
-can do:
+pipeline is online. `.github/workflows/release.yml` calls the shared
+`p-arndt/.github` `go-release.yml` workflow and does what a workflow file can do:
 
-- The secret is declared on the signing step alone, so no other step in the job
-  can read it; the signer binary is compiled in an earlier step, without it.
-- `selfcheck` runs in its own step without the secret — verification needs only
-  the public key.
+- The secret reaches only the shared workflow's signing step, as
+  `RELEASE_SIGNING_KEY`; no other step or job can read it. Inside that step the
+  signer is compiled and `selfcheck` runs under `env -u RELEASE_SIGNING_KEY`,
+  so only `release-sign sign` itself sees the key, never the Go toolchain.
+- `selfcheck` verifies with the public key alone, embedded in internal/update.
 - Third-party actions are pinned to commit SHAs, never tags.
 - Every `${{ … }}` value reaches a `run:` block through `env:`, never inline.
-- The job declares `environment: release`.
 
-The rest cannot live in the repository and must be configured once in
-**Settings** — without it, the `environment:` line is decoration:
+What the shared workflow cannot do: a job that calls a reusable workflow cannot
+declare `environment:`, so there is no `release` environment gating the key. The
+secret therefore has to stay a **repository** secret; an environment secret
+would read as empty and fail the release. The rest must be configured once in
+**Settings**:
 
-1. **Settings → Environments → `release`:** add **required reviewers** (so a
-   release run pauses for a human before the key is handed out) and a
-   **deployment branch/tag rule** limiting it to `v*` tags.
-2. Move `RELEASE_SIGNING_KEY` from a repository secret to an **environment
-   secret** on `release`. A repository secret is readable by any workflow;
-   an environment secret is only available to jobs that pass the rules above.
-3. **Settings → Rules → Tag rulesets:** protect `v*` so tags cannot be created
-   or moved by anyone who should not be cutting releases.
-4. Keep the set of people who can push to `main`, dispatch workflows, or approve
-   the `release` environment as small as the set you would hand the key to —
-   because it is the same thing.
+1. **Settings → Rules → Tag rulesets:** protect `v*` so tags cannot be created
+   or moved by anyone who should not be cutting releases. A tag push is the only
+   thing that starts a release.
+2. Keep the set of people who can push to `main` or push tags as small as the
+   set you would hand the key to — because it is the same thing.
 
 ## Why the trusted keys are a **list**
 
@@ -146,16 +143,15 @@ Do this once, before the first signed release ships.
    }
    ```
 
-3. **Set the CI secret** from the private key file. Prefer the `release`
-   environment over a repository-wide secret — see
-   [Protecting the signing job](#protecting-the-signing-job):
+3. **Set the CI secret** from the private key file. It must be a repository
+   secret — see [Protecting the signing job](#protecting-the-signing-job):
 
    ```sh
-   gh secret set RELEASE_SIGNING_KEY --env release < ~/.shenv-release/release.key
+   gh secret set RELEASE_SIGNING_KEY < ~/.shenv-release/release.key
    ```
 
    (Or paste the file's contents in the GitHub UI:
-   *Settings → Environments → release → Environment secrets*.)
+   *Settings → Secrets and variables → Actions → Repository secrets*.)
 
 4. **Back up the key file offline** (password manager / offline storage), then
    delete the local copy:
@@ -216,7 +212,7 @@ picked up a binary that trusts both — then, and only then, switch signing over
    both-trusting binary:
 
    ```sh
-   gh secret set RELEASE_SIGNING_KEY --env release < ~/.shenv-release/release-new.key
+   gh secret set RELEASE_SIGNING_KEY < ~/.shenv-release/release-new.key
    ```
 
    Back the new key up offline, delete the local copy, and delete the old key's

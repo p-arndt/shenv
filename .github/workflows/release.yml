@@ -1,254 +1,62 @@
-name: Build and Publish Release
-# Default for anything added later; the one job that publishes raises this to
-# `contents: write` for itself.
-permissions:
-  contents: read
+name: Release
 
-# Two release runs uploading assets to the same tag would race; queue them
-# instead (never cancel — a half-cancelled release could leave a tag with
-# partial assets).
-concurrency:
-  group: release
-  cancel-in-progress: false
-
+# Tag push only: `just release` (stamp) bumps VERSION, commits, tags and pushes.
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to build, e.g. 0.2.0 or 0.2.0-beta.1 ("v" prefix optional). Leave empty to use the VERSION file with a -pre.<run> suffix'
-        required: false
-        type: string
-      prerelease:
-        description: 'Mark as a GitHub pre-release'
-        required: false
-        type: boolean
-        default: true
-      draft:
-        description: 'Create as a draft so you can review/publish it manually'
-        required: false
-        type: boolean
-        default: true
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    # Cross-compiling with CGO disabled means one Linux runner builds every
-    # target — no per-OS matrix needed.
+  # A release gate ahead of signing: a known-vulnerable stdlib or dependency
+  # must not get a signature every shipped updater will accept. The shared
+  # workflow has no such step, so it runs here and the release waits for it.
+  vuln:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    # Creating the release needs write; nothing else here does.
-    permissions:
-      contents: write
-
-    # RELEASE_SIGNING_KEY is an online secret: repository code (`go run`) runs in
-    # the same job that can read it, so whoever can trigger this workflow can use
-    # the key. The environment is where that is gated — configure required
-    # reviewers and a tag/branch deployment rule on it in the repository settings;
-    # naming it here is what makes those rules apply.
-    environment: release
-
-    # Third-party actions are pinned to full commit SHAs, not tags: tags are
-    # mutable, and this workflow holds RELEASE_SIGNING_KEY — the key the whole
-    # updater trust model reduces to. A repointed tag on any action here (the
-    # toolchain setup especially, since the signer is compiled by it) could
-    # exfiltrate the key and forge releases every shipped updater would accept.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
-          fetch-tags: true
-          # This job never pushes, and it runs with the signing key in reach —
-          # don't leave a writable token in .git/config for the steps that do.
           persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # Reads the pinned patch release from go.mod's toolchain directive, so
-          # the stdlib compiled into published binaries is the reviewed one.
           go-version-file: go.mod
-          # The runner image's Go can lag behind that pin; resolve upstream
-          # rather than publishing binaries built by a stale cached toolchain.
           check-latest: true
           cache: true
 
-      - name: Determine version
-        id: version
-        shell: bash
-        # Every ${{ }} value reaches this script through env, never inline
-        # interpolation into the script body — interpolated input is how GitHub
-        # Actions script injection happens.
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_PRERELEASE: ${{ inputs.prerelease }}
-          INPUT_DRAFT: ${{ inputs.draft }}
-          EVENT_NAME: ${{ github.event_name }}
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            VERSION="$INPUT_VERSION"
-            if [ -z "$VERSION" ]; then
-              # No version given: derive one from the VERSION file, suffixed with
-              # the semver pre-release identifier "-pre.<run number>" so each
-              # manual run gets its own, ever-incrementing version.
-              VERSION="$(cat VERSION)-pre.${RUN_NUMBER}"
-            fi
-            VERSION="${VERSION#v}"
-            PRERELEASE="$INPUT_PRERELEASE"
-            DRAFT="$INPUT_DRAFT"
-          else
-            # Tag push: v0.2.0 -> 0.2.0.
-            VERSION="${GITHUB_REF_NAME#v}"
-            DRAFT=false
-            # Semver pre-release tags (e.g. v0.2.0-beta.1) are flagged automatically.
-            if [[ "$VERSION" == *-* ]]; then PRERELEASE=true; else PRERELEASE=false; fi
-          fi
-          # Mirror of validVersion in internal/update: digits-first, semver
-          # charset, bounded length. A version the shipped updater would refuse
-          # must never become the latest release — `shenv update` would break
-          # for every user until a fixed release ships. Failing here also keeps
-          # the version safe to splice into file names and the tag.
-          if ! [[ "$VERSION" =~ ^[0-9][0-9A-Za-z.+-]{0,63}$ ]]; then
-            echo "::error::version '$VERSION' is not a valid release version (shipped updaters would refuse it)" >&2
-            exit 1
-          fi
-          echo "VERSION=$VERSION"   >> "$GITHUB_OUTPUT"
-          echo "TAG=v$VERSION"      >> "$GITHUB_OUTPUT"
-          echo "PRERELEASE=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "DRAFT=$DRAFT"       >> "$GITHUB_OUTPUT"
-
-      - name: Test
-        # Nothing gets built, signed, or published from a commit that fails
-        # vet + tests.
-        shell: bash
-        run: |
-          set -euo pipefail
-          go vet ./...
-          go test ./...
-
       - name: Vulnerability scan
-        # A release gate, deliberately ahead of the signing step: a known-
-        # vulnerable stdlib or dependency must not get a signature every shipped
-        # updater will accept. Pinned by version rather than added as an action
-        # — this workflow holds the signing key and pins everything it executes.
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
-      - name: Build static binaries (all platforms)
-        # CGO_ENABLED=0 links no libc -> every binary is fully static and
-        # portable. -trimpath drops local paths; -s -w strips symbols/DWARF.
-        # Version metadata is injected into internal/buildinfo via -X.
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          set -euo pipefail
-          COMMIT="$(git rev-parse --short HEAD)"
-          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LDFLAGS="-s -w \
-            -X shenv/internal/buildinfo.Version=${VERSION} \
-            -X shenv/internal/buildinfo.Commit=${COMMIT} \
-            -X shenv/internal/buildinfo.Date=${DATE}"
-
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
-            GOOS="${target%/*}"; GOARCH="${target#*/}"
-            bin="shenv"; [ "$GOOS" = windows ] && bin="shenv.exe"
-            echo "-> building $GOOS/$GOARCH"
-            rm -rf stage && mkdir stage
-            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
-              go build -trimpath -ldflags "$LDFLAGS" -o "stage/$bin" ./cmd/shenv
-            cp README.md stage/
-            name="shenv_${VERSION}_${GOOS}_${GOARCH}"
-            if [ "$GOOS" = windows ]; then
-              (cd stage && zip -q "../dist/${name}.zip" "$bin" README.md)
-            else
-              tar -czf "dist/${name}.tar.gz" -C stage "$bin" README.md
-            fi
-          done
-
-          # Checksums over the archives (computed before the file itself exists).
-          (cd dist && sha256sum shenv_*.* > "shenv_${VERSION}_checksums.txt")
-          ls -l dist
-
-      - name: Build the release signer
-        # Compiled here, before the secret is in scope: `go run` would download
-        # modules and invoke the whole toolchain with RELEASE_SIGNING_KEY in the
-        # environment. Only the finished binary needs to see the key.
-        shell: bash
-        run: |
-          set -euo pipefail
-          go build -o bin/release-sign ./cmd/release-sign
-
-      - name: Sign checksums
-        # `shenv update` refuses unsigned releases, so a release without this
-        # signature would strand every shipped updater — fail loudly instead of
-        # publishing one. The key lives in this secret (and the maintainer's
-        # offline backup); the matching public key is embedded in the binary via
-        # internal/update/sign.go. The secret is declared on this step alone so
-        # no other step in the job can read it.
-        shell: bash
-        env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          set -euo pipefail
-          if [ -z "$RELEASE_SIGNING_KEY" ]; then
-            echo "::error::RELEASE_SIGNING_KEY secret is not set — shenv update requires signed releases." >&2
-            echo "Generate one with: go run ./cmd/release-sign gen <keyfile>, then gh secret set RELEASE_SIGNING_KEY < <keyfile>" >&2
-            exit 1
-          fi
-          ./bin/release-sign sign "dist/shenv_${VERSION}_checksums.txt"
-
-      - name: Verify the signature against the embedded key
-        # Round-trip against the public key embedded in this commit's
-        # internal/update — the exact check every shipped updater runs. If the
-        # secret and the embedded key have drifted apart, fail the release now
-        # instead of publishing assets no updater will accept. Verification is a
-        # public-key operation, so this step runs without the secret.
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.VERSION }}
-        run: |
-          set -euo pipefail
-          ./bin/release-sign selfcheck "dist/shenv_${VERSION}_checksums.txt"
-
-      - name: Generate changelog
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
-        with:
-          config: cliff.toml
-          # On a tag push the tag already exists, so --latest covers it. On a
-          # manual run no tag exists yet (action-gh-release creates it below),
-          # so fall back to --unreleased to cover commits since the last tag.
-          args: ${{ github.event_name == 'workflow_dispatch' && '--unreleased --strip all' || '--latest --strip all' }}
-        env:
-          OUTPUT: CHANGELOG_BODY.md
-
-      - name: Assemble release notes
-        shell: bash
-        env:
-          TAG: ${{ steps.version.outputs.TAG }}
-          PRERELEASE: ${{ steps.version.outputs.PRERELEASE }}
-        run: |
-          CUR="$TAG"
-          if [ "$PRERELEASE" = "true" ]; then
-            echo "## 🧪 Pre-release $CUR" > RELEASE_NOTES.md
-          else
-            echo "## 🚀 Release $CUR" > RELEASE_NOTES.md
-          fi
-          echo "" >> RELEASE_NOTES.md
-          cat CHANGELOG_BODY.md >> RELEASE_NOTES.md
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          tag_name: ${{ steps.version.outputs.TAG }}
-          body_path: RELEASE_NOTES.md
-          prerelease: ${{ steps.version.outputs.PRERELEASE }}
-          draft: ${{ steps.version.outputs.DRAFT }}
-          files: |
-            dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Assets: shenv_<version>_<os>_<arch>.tar.gz (.zip on windows) with README.md,
+  # shenv_<version>_checksums.txt and its signature shenv_<version>_checksums.txt.sig
+  # (written by release-sign next to the checksums file). internal/update
+  # downloads exactly these names.
+  release:
+    needs: vuln
+    uses: p-arndt/.github/.github/workflows/go-release.yml@v1
+    # A called workflow gets at most what its caller grants.
+    permissions:
+      contents: write
+    with:
+      binary: shenv
+      main: ./cmd/shenv
+      archive-extra-files: README.md
+      changelog: git-cliff
+      # `shenv update` refuses unsigned releases, so signing is mandatory; the
+      # shared workflow fails the release if the key is missing. The signer is
+      # compiled and the signature verified with the key removed from the
+      # environment: only `release-sign sign` sees RELEASE_SIGNING_KEY, not the
+      # Go toolchain. `selfcheck` verifies against the public key embedded in
+      # internal/update, so a key mismatch fails the release instead of
+      # stranding every shipped updater.
+      sign: true
+      sign-command: >-
+        env -u RELEASE_SIGNING_KEY go build -o "$RUNNER_TEMP/release-sign" ./cmd/release-sign &&
+        "$RUNNER_TEMP/release-sign" sign "$CHECKSUMS" &&
+        env -u RELEASE_SIGNING_KEY "$RUNNER_TEMP/release-sign" selfcheck "$CHECKSUMS"
+    secrets:
+      signing-key: ${{ secrets.RELEASE_SIGNING_KEY }}
