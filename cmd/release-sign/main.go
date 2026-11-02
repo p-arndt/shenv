@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"shenv/internal/backend"
 	"shenv/internal/identity"
 	"shenv/internal/update"
 )
@@ -146,7 +147,12 @@ func sign(file string) error {
 	// The signed message includes the file's base name (it carries the release
 	// version) — see releaseSigMessage. The updater verifies under that name.
 	sig := update.SignChecksums(ed25519.NewKeyFromSeed(seed), filepath.Base(file), content)
-	if err := os.WriteFile(file+".sig", []byte(sig+"\n"), 0o644); err != nil {
+	if err := backend.RejectSymlinks(file + ".sig"); err != nil {
+		return err
+	}
+	// Replace the directory entry so an existing hardlink cannot redirect the
+	// write, and a failed write cannot leave a truncated release signature.
+	if err := backend.WriteFileAtomic(file+".sig", []byte(sig+"\n"), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("signed %s -> %s.sig\n", file, file)

@@ -169,3 +169,47 @@ func TestGenKeyRoundTripsThroughSignAndVerify(t *testing.T) {
 		t.Fatal("verify accepted a signature from a different key")
 	}
 }
+
+func TestSignDoesNotOverwriteLinkedTarget(t *testing.T) {
+	for _, kind := range []string{"symlink", "hardlink"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			file := filepath.Join(dir, "checksums.txt")
+			target := filepath.Join(dir, "unrelated")
+			for path, content := range map[string]string{file: "checksums\n", target: "keep this file\n"} {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := os.Link
+			if kind == "symlink" {
+				link = os.Symlink
+			}
+			if err := link(target, file+".sig"); err != nil {
+				t.Skipf("links unavailable: %v", err)
+			}
+			seed := make([]byte, ed25519.SeedSize)
+			t.Setenv("RELEASE_SIGNING_KEY", base64.RawStdEncoding.EncodeToString(seed))
+			err := sign(file)
+			if kind == "symlink" {
+				if err == nil {
+					t.Error("sign accepted a symlink destination")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			} else {
+				pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
+				if err := verify(file, base64.RawStdEncoding.EncodeToString(pub)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != "keep this file\n" {
+				t.Fatal("sign overwrote the linked target")
+			}
+		})
+	}
+}
