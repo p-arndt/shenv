@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.8.2 - 2026-11-02
+
+### Changed
+
+- Stable builds no longer update to, or announce, a pre-release. `shenv update` reports that you're up to date and mentions the skipped pre-release.
+
+### Security
+
+- A changed or removed `project` id in config.shenv now asks for confirmation, just like a changed member list. Machines that already trust a repo adopt its current id silently on first use.
+- Blob paths in config.shenv that would land on a different file on Windows (trailing dots or spaces, short names like `GITIGN~1`, `:`, backslashes) are refused on every platform.
+- Build releases with Go 1.26.10 to include the latest standard-library security fixes, including rejection of compromised intermediate certificates.
+- Error messages no longer echo the contents of the file they failed to read, so a planted symlink can't print a local secret file into your terminal or CI log.
+- Member names that only look alike are now rejected: case, accents, styled Unicode letters and invisible characters no longer let a new member pass as an existing one. A team with two such names (e.g. `jörg` and `jorg`) has to rename one.
+- On macOS and Windows, `shenv open` refuses to write the secrets when git tracks a differently-cased copy of the target, such as a committed `.ENV`. It used to overwrite that tracked file, ready to be committed.
+- Release signing now rejects symlink signature destinations and replaces signatures atomically, preventing linked files from being overwritten. Updated golang.org/x/crypto to v0.56.0.
+- `shenv init` and `add-member` refuse to write recipients.shenv through a symlink.
+
 ## 0.8.1 - 2026-10-01
 
 ### Fixed

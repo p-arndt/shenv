@@ -1,1 +1,0 @@
-Member names that only look alike are now rejected: case, accents, styled Unicode letters and invisible characters no longer let a new member pass as an existing one. A team with two such names (e.g. `jörg` and `jorg`) has to rename one.

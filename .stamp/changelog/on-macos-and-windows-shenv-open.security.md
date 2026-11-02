@@ -1,1 +1,0 @@
-On macOS and Windows, `shenv open` refuses to write the secrets when git tracks a differently-cased copy of the target, such as a committed `.ENV`. It used to overwrite that tracked file, ready to be committed.
